@@ -1,6 +1,6 @@
 module github.com/tinkerbell/cluster-api-provider-tinkerbell
 
-go 1.25.0
+go 1.26.1
 
 require (
 	github.com/go-logr/logr v1.4.3
@@ -10,6 +10,7 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/peterbourgon/ff/v3 v3.4.0
 	github.com/rs/zerolog v1.35.1
+	github.com/tinkerbell/cluster-api-provider-tinkerbell/api v0.0.0
 	github.com/tinkerbell/tinkerbell/api v0.23.0
 	golang.org/x/sync v0.22.0
 	k8s.io/api v0.35.3
@@ -22,7 +23,6 @@ require (
 )
 
 require (
-	dario.cat/mergo v1.0.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -79,3 +79,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2-0.20260122202528-d9cc6641c482 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace github.com/tinkerbell/cluster-api-provider-tinkerbell/api => ./api
