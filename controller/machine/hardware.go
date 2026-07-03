@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -102,9 +103,16 @@ func (scope *machineReconcileScope) patchHardwareAnnotations(hw *tinkv1.Hardware
 }
 
 func (scope *machineReconcileScope) takeHardwareOwnership(hw *tinkv1.Hardware) error {
-	patchHelper, err := patch.NewHelper(hw, scope.tinkerbellClient)
-	if err != nil {
-		return fmt.Errorf("initializing patch helper for selected hardware: %w", err)
+	// hardwareForMachine() lists only unowned Hardware and returns the first element
+	// after a deterministic sort, so two Machines reconciling concurrently can select
+	// the SAME Hardware. Guard against claiming one already owned by a different
+	// Machine: back off and requeue so the next pass re-lists (this Hardware is now
+	// filtered out by the DoesNotExist owner selector) and picks a still-free one.
+	if owner, ok := hw.Labels[HardwareOwnerNameLabel]; ok &&
+		(owner != scope.tinkerbellMachine.Name ||
+			hw.Labels[HardwareOwnerNamespaceLabel] != scope.tinkerbellMachine.Namespace) {
+		return fmt.Errorf("hardware %q already owned by %s/%s, requeuing to select free hardware",
+			hw.Name, hw.Labels[HardwareOwnerNamespaceLabel], owner)
 	}
 
 	if hw.Labels == nil {
@@ -119,8 +127,18 @@ func (scope *machineReconcileScope) takeHardwareOwnership(hw *tinkv1.Hardware) e
 	controllerutil.RemoveFinalizer(hw, infrastructurev1.MachineLegacyFinalizer)
 	controllerutil.AddFinalizer(hw, infrastructurev1.MachineFinalizer)
 
-	if err := patchHelper.Patch(scope.ctx, hw); err != nil {
-		return fmt.Errorf("patching Hardware object: %w", err)
+	// Claim with optimistic concurrency: Update carries the ResourceVersion read by
+	// hardwareForMachine's List, so a losing concurrent claim of the same Hardware
+	// gets a Conflict instead of silently overwriting the winner's ownership (the
+	// former left one Machine unbound and another Hardware unclaimed). Requeue on
+	// conflict to re-list and select a still-free Hardware. A plain patch merged
+	// without a precondition, which is why concurrent claims used to both succeed.
+	if err := scope.tinkerbellClient.Update(scope.ctx, hw); err != nil {
+		if apierrors.IsConflict(err) {
+			return fmt.Errorf("conflict claiming hardware %q (concurrent claim), requeuing: %w", hw.Name, err)
+		}
+
+		return fmt.Errorf("claiming Hardware ownership: %w", err)
 	}
 
 	return nil
