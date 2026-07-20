@@ -1,6 +1,7 @@
 package machine
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -53,6 +54,9 @@ var (
 	// ErrHardwareMissingDiskConfiguration is returned when the referenced hardware is missing
 	// disk configuration.
 	ErrHardwareMissingDiskConfiguration = fmt.Errorf("disk configuration is required")
+	// errHardwareClaimRequeue marks expected claim contention that should be retried
+	// without surfacing a reconciliation error.
+	errHardwareClaimRequeue = errors.New("hardware claim requires requeue")
 )
 
 // hardwareIP returns the IP address of the first network interface of the given hardware.
@@ -102,18 +106,37 @@ func (scope *machineReconcileScope) patchHardwareAnnotations(hw *tinkv1.Hardware
 	return nil
 }
 
+// hardwareAlreadyClaimed reports whether hw already carries this Machine's ownership
+// labels and the expected finalizer state, i.e. a claim would have nothing to write.
+func (scope *machineReconcileScope) hardwareAlreadyClaimed(hw *tinkv1.Hardware) bool {
+	return hw.Labels[HardwareOwnerNameLabel] == scope.tinkerbellMachine.Name &&
+		hw.Labels[HardwareOwnerNamespaceLabel] == scope.tinkerbellMachine.Namespace &&
+		controllerutil.ContainsFinalizer(hw, infrastructurev1.MachineFinalizer) &&
+		!controllerutil.ContainsFinalizer(hw, infrastructurev1.MachineLegacyFinalizer)
+}
+
 func (scope *machineReconcileScope) takeHardwareOwnership(hw *tinkv1.Hardware) error {
-	// hardwareForMachine() lists only unowned Hardware and returns the first element
-	// after a deterministic sort, so two Machines reconciling concurrently can select
-	// the SAME Hardware. Guard against claiming one already owned by a different
-	// Machine: back off and requeue so the next pass re-lists (this Hardware is now
-	// filtered out by the DoesNotExist owner selector) and picks a still-free one.
+	// hardwareForMachine() returns already-assigned Hardware for this Machine first,
+	// otherwise lists unowned Hardware and returns the first element after a
+	// deterministic sort — so two Machines reconciling concurrently can still select
+	// the SAME unowned Hardware. Guard against claiming one already owned by a
+	// different Machine: back off and requeue so the next pass re-lists (this Hardware
+	// is now filtered out by the DoesNotExist owner selector) and picks a still-free one.
 	if owner, ok := hw.Labels[HardwareOwnerNameLabel]; ok &&
 		(owner != scope.tinkerbellMachine.Name ||
 			hw.Labels[HardwareOwnerNamespaceLabel] != scope.tinkerbellMachine.Namespace) {
-		return fmt.Errorf("hardware %q already owned by %s/%s, requeuing to select free hardware",
+		return fmt.Errorf("%w: hardware %q already owned by %s/%s",
+			errHardwareClaimRequeue,
 			hw.Name, hw.Labels[HardwareOwnerNamespaceLabel], owner)
 	}
+
+	// Already claimed by this Machine with the expected finalizer state: nothing to
+	// write. Skipping the no-op patch avoids bumping resourceVersion on every
+	// reconcile and the avoidable conflicts that causes for other writers.
+	if scope.hardwareAlreadyClaimed(hw) {
+		return nil
+	}
+	base := hw.DeepCopy()
 
 	if hw.Labels == nil {
 		hw.Labels = map[string]string{}
@@ -127,15 +150,14 @@ func (scope *machineReconcileScope) takeHardwareOwnership(hw *tinkv1.Hardware) e
 	controllerutil.RemoveFinalizer(hw, infrastructurev1.MachineLegacyFinalizer)
 	controllerutil.AddFinalizer(hw, infrastructurev1.MachineFinalizer)
 
-	// Claim with optimistic concurrency: Update carries the ResourceVersion read by
-	// hardwareForMachine's List, so a losing concurrent claim of the same Hardware
-	// gets a Conflict instead of silently overwriting the winner's ownership (the
-	// former left one Machine unbound and another Hardware unclaimed). Requeue on
-	// conflict to re-list and select a still-free Hardware. A plain patch merged
-	// without a precondition, which is why concurrent claims used to both succeed.
-	if err := scope.tinkerbellClient.Update(scope.ctx, hw); err != nil {
+	// Claim with an optimistic-lock merge patch. This keeps the write limited to
+	// ownership labels and finalizers while carrying the ResourceVersion read by
+	// hardwareForMachine. A losing concurrent claim gets a Conflict instead of
+	// silently overwriting the winner's ownership.
+	claimPatch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	if err := scope.tinkerbellClient.Patch(scope.ctx, hw, claimPatch); err != nil {
 		if apierrors.IsConflict(err) {
-			return fmt.Errorf("conflict claiming hardware %q (concurrent claim), requeuing: %w", hw.Name, err)
+			return fmt.Errorf("%w: conflict claiming hardware %q: %w", errHardwareClaimRequeue, hw.Name, err)
 		}
 
 		return fmt.Errorf("claiming Hardware ownership: %w", err)
