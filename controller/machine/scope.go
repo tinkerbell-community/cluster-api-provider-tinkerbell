@@ -197,6 +197,14 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 			Provisioned: ptr.To(true),
 		}
 
+		// A provisioned machine is never re-imaged on a spec change, which is what makes
+		// Cluster API in-place updates viable here. The one thing that can still go wrong is
+		// the node failing to return from the reboot an in-place Talos upgrade performs, so
+		// offer it a BMC power cycle if it has been stalled too long.
+		if err := scope.reconcileInPlaceRecovery(hw, DefaultInPlaceRecoveryTimeout); err != nil {
+			return fmt.Errorf("reconciling in-place update recovery: %w", err)
+		}
+
 		return nil
 	}
 
