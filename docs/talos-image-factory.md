@@ -72,6 +72,147 @@ actions:
 A template that does not reference these keys is unaffected — they are simply absent when
 resolution has not run.
 
+### Alternative: run the installer directly
+
+> **Unvalidated.** The template below has not been run against real hardware. It is recorded
+> here because the argument surface has been confirmed against the Talos source, but the part
+> that can only be proven on metal — whether the installer runs cleanly under HookOS's
+> container runtime — has not been. Treat it as a starting point for a hardware test, not a
+> working recipe.
+
+The Talos installer is a container image, and it is the same image Talos runs against itself
+during `talosctl upgrade`. Running it as a Tink action rather than streaming a raw disk image
+means one artefact installs *and* upgrades a machine, so the two cannot drift:
+
+```yaml
+actions:
+  - name: install-talos
+    image: factory.talos.dev/metal-installer/{{ .schematicID }}:v1.14.0-rc.1
+    command:
+      - /bin/installer
+      - install
+      - --disk=/dev/nvme0n1
+      - --platform=metal
+      - --config=http://tootles.tinkerbell.svc/2009-04-04/user-data
+```
+
+`--config` is **not** the machine configuration. It is the value of the `talos.config` kernel
+parameter — a URL the installed system fetches from at boot. Pointing it at Tootles works
+because CAPT already writes the Talos machine configuration into `Hardware.spec.userData`,
+and Tootles serves exactly that at `/2009-04-04/user-data`.
+
+The installer *does* accept a machine configuration, but on **stdin**
+(`configloader.NewFromStdin`), where it is used to validate the config and to read
+`machine.install` settings. Tink actions have no mechanism to pipe data to a container, and
+the installer image is minimal, so this template does not use it. The installer tolerates the
+absence — it logs `machine configuration missing, skipping validation` and continues — but
+note that the Talos source treats that as an upgrade-in-maintenance-mode path, so it is
+tolerated rather than intended. The trade-off is losing install-time config validation; the
+configuration is still validated when Talos applies it.
+
+Serving the configuration rather than baking it in is deliberate. The in-place update path
+regenerates the machine configuration and applies it over the Talos API, so a copy frozen onto
+the disk at install time would become a second source of truth and go stale the first time
+anyone changed a `configPatch`.
+
+The full installer flag set, for reference:
+
+| Flag | Meaning |
+|---|---|
+| `--disk` | Target disk |
+| `--config` | Value of the `talos.config` kernel parameter |
+| `--platform` | Value of the `talos.platform` kernel parameter |
+| `--arch` | Target architecture, defaults to the runtime architecture |
+| `--extra-kernel-arg` | Additional kernel argument, repeatable |
+| `--upgrade` | The install is being performed by an upgrade |
+| `--force` | Forcefully format the partition |
+| `--zero` | Zero the disk before installing |
+| `--meta` | A key/value pair for META |
+
+`status.diskImageURL` is retained rather than removed so the `image2disk` route above remains
+available as a fallback until this path has been proven on hardware.
+
+## Networking before the machine configuration exists
+
+Delivering the machine configuration over the network — whether by `talos.config=` or by
+applying it in maintenance mode — assumes the machine already has working networking. On DHCP
+that holds. It does not hold for a machine that needs a static address, a VLAN, or a bond to
+reach anything, because that networking is described in the configuration it cannot yet
+fetch.
+
+Talos breaks that cycle with the `META` partition. Writing a serialized network configuration
+to META key `0xa` gives the machine its networking before any configuration is fetched:
+
+```
+0x6  Upgrade                       0xb  DownloadURLCode
+0x7  StagedUpgradeImageRef         0xc  UserReserved1
+0x8  StagedUpgradeInstallOptions   0xd  UserReserved2
+0x9  StateEncryptionConfig         0xe  UserReserved3
+0xa  MetalNetworkPlatformConfig    0xf  UUIDOverride
+```
+
+(from `pkg/machinery/meta/constants.go`; the block starts at `iota + 6`.)
+
+Key `0xa` holds a YAML-serialized `network.PlatformConfigSpec` — the same structure every
+Talos platform produces from `NetworkConfiguration()`:
+
+```yaml
+addresses: []      # AddressSpecSpec
+links: []          # LinkSpecSpec — bonds, VLANs, MTU
+routes: []         # RouteSpecSpec
+hostnames: []
+resolvers: []
+timeServers: []
+operators: []      # e.g. DHCP per link
+externalIPs: []
+```
+
+### Writing it
+
+On the installer path, pass it directly — the installer takes repeatable `--meta` key/value
+pairs:
+
+```yaml
+command:
+  - /bin/installer
+  - install
+  - --disk=/dev/nvme0n1
+  - --platform=metal
+  - --config=http://tootles.tinkerbell.svc/2009-04-04/user-data
+  - --meta=0xa=<serialized PlatformConfigSpec>
+```
+
+On the `image2disk` path the same value has to be written to the META partition by a
+subsequent action, since nothing in the raw image knows about this machine.
+
+Either way the value is per-machine, so it belongs in the Workflow template rather than in a
+shared image, and it is not part of the schematic — the schematic describes the image, not the
+machine.
+
+> Note that the Image Factory also accepts `customization.meta` in a schematic. That is not a
+> substitute: a schematic is shared by every machine resolving to the same ID, so it cannot
+> carry per-machine networking. It is also ignored for installer and initramfs images.
+
+### Why not write the machine configuration into STATE instead
+
+Seeding `STATE` with the machine configuration from a Workflow removes the boot-time fetch
+entirely, which is appealing for the same reason META is. Two things argue against it:
+
+- It couples the Workflow to Talos' on-disk layout, which the installer otherwise owns.
+- It breaks outright once `STATE` encryption is in use — which is precisely why
+  `StateEncryptionConfig` exists as its own META key at `0x9`. A Workflow writing plaintext
+  into a partition Talos intends to encrypt is writing something Talos will not read.
+
+Staleness is *not* one of the arguments. Talos owns `STATE` after first boot, and an in-place
+update applying a regenerated configuration over the Talos API persists it there, so an
+install-time write would be a seed rather than a competing copy.
+
+The combination that avoids both problems is META `0xa` for networking plus `talos.config=`
+for the machine configuration: networking arrives before anything is fetched, the
+configuration stays current because it is served rather than baked, and nothing reaches into
+the STATE partition. Talos supports per-machine config URLs directly — META key `0xb`
+(`DownloadURLCode`) supplies the `${code}` variable in a `talos.config=` URL.
+
 ## Feeding the machine configuration
 
 CABPT reads `status.installerImage` from the referenced InfraMachine and injects it as
