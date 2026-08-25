@@ -162,6 +162,22 @@ type TinkerbellMachineStatus struct {
 	// +optional
 	State *TinkerbellResourceStatus `json:"state,omitempty"`
 
+	// SchematicID is the Talos Image Factory schematic resolved for this machine from its
+	// hardware characteristics. Content-addressed, so it only changes when the hardware or the
+	// requested system extensions change.
+	// +optional
+	SchematicID string `json:"schematicID,omitempty"`
+
+	// InstallerImage is the Talos installer image for the resolved schematic. This is the value
+	// that belongs in machine.install.image, and the image Talos upgrades to in place.
+	// +optional
+	InstallerImage string `json:"installerImage,omitempty"`
+
+	// DiskImageURL is the raw disk image for the resolved schematic, written to disk by the
+	// provisioning Workflow. Architecture-specific, unlike InstallerImage.
+	// +optional
+	DiskImageURL string `json:"diskImageURL,omitempty"`
+
 	// TargetNamespace is the resolved namespace where Tinkerbell resources
 	// (Template, Workflow, Job) for this machine are created.
 	// It is computed once during hardware selection and persisted so that subsequent

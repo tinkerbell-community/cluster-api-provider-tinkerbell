@@ -1088,6 +1088,11 @@ spec:
                   - type
                   type: object
                 type: array
+              diskImageURL:
+                description: |-
+                  DiskImageURL is the raw disk image for the resolved schematic, written to disk by the
+                  provisioning Workflow. Architecture-specific, unlike InstallerImage.
+                type: string
               errorMessage:
                 description: |-
                   ErrorMessage will be set in the event that there is a terminal problem
@@ -1125,9 +1130,20 @@ spec:
                       NOTE: this field is part of the Cluster API contract, and it is used to orchestrate initial Machine provisioning.
                     type: boolean
                 type: object
+              installerImage:
+                description: |-
+                  InstallerImage is the Talos installer image for the resolved schematic. This is the value
+                  that belongs in machine.install.image, and the image Talos upgrades to in place.
+                type: string
               ready:
                 description: Ready is true when the provider resource is ready.
                 type: boolean
+              schematicID:
+                description: |-
+                  SchematicID is the Talos Image Factory schematic resolved for this machine from its
+                  hardware characteristics. Content-addressed, so it only changes when the hardware or the
+                  requested system extensions change.
+                type: string
               state:
                 description: State is the status of the Tinkerbell device instance
                   for this machine.

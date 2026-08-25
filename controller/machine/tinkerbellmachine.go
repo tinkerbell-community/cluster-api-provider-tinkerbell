@@ -44,6 +44,7 @@ import (
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	tinkcluster "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/cluster"
+	"github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/schematic"
 )
 
 const (
@@ -68,6 +69,12 @@ type TinkerbellMachineReconciler struct {
 	WatchManager     *tinkcluster.NamespaceWatchManager
 	Scheme           *runtime.Scheme
 	WatchFilterValue string
+
+	// SchematicRegistrar resolves Talos Image Factory schematics from hardware
+	// characteristics. Nil disables resolution, leaving templates to supply their own image.
+	SchematicRegistrar *schematic.Registrar
+	// FactoryURL is the Image Factory used to build image references.
+	FactoryURL string
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=tinkerbellmachines,verbs=get;list;watch;create;update;patch;delete
@@ -103,6 +110,8 @@ func (r *TinkerbellMachineReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		tinkerbellClient:   r.TinkerbellClient,
 		externalTinkerbell: r.ExternalTinkerbell,
 		watchManager:       r.WatchManager,
+		schematicRegistrar: r.SchematicRegistrar,
+		factoryURL:         r.FactoryURL,
 	}
 
 	if err := r.Get(ctx, req.NamespacedName, scope.tinkerbellMachine); err != nil {

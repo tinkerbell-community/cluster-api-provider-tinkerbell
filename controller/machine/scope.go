@@ -38,6 +38,7 @@ import (
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	tinkcluster "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/cluster"
+	"github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/schematic"
 )
 
 const (
@@ -86,6 +87,10 @@ type machineReconcileScope struct {
 	// in external mode it targets a separate Tinkerbell cluster.
 	tinkerbellClient   client.Client
 	externalTinkerbell bool // true when tinkerbellClient targets an external cluster
+
+	// schematicRegistrar resolves Talos Image Factory schematics. Nil disables resolution.
+	schematicRegistrar *schematic.Registrar
+	factoryURL         string
 	watchManager       *tinkcluster.NamespaceWatchManager
 }
 
@@ -206,6 +211,13 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 		}
 
 		return nil
+	}
+
+	// Resolve the Image Factory schematic before the Workflow is created so the template can
+	// reference the resulting disk image, and so the installer image is on status for the
+	// bootstrap provider to pick up.
+	if err := scope.reconcileSchematic(hw); err != nil {
+		return fmt.Errorf("reconciling Image Factory schematic: %w", err)
 	}
 
 	wf, err := scope.ensureTemplateAndWorkflow(hw)

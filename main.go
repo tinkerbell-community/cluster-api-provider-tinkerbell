@@ -48,6 +48,7 @@ import (
 	"github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/build"
 	tinkcluster "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/cluster"
 	captconversion "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/conversion"
+	"github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/schematic"
 	tinkerbellwebhooks "github.com/tinkerbell/cluster-api-provider-tinkerbell/webhooks"
 )
 
@@ -58,6 +59,7 @@ type config struct {
 	WatchNamespace                string
 	HealthAddr                    string
 	WatchFilterValue              string
+	ImageFactoryURL               string
 	WebhookCertDir                string
 	TinkerbellClusterConcurrency  int
 	TinkerbellMachineConcurrency  int
@@ -193,6 +195,8 @@ func (c *config) setupReconcilers(ctx context.Context, log logr.Logger, rs *runt
 		WatchManager:       result.WatchManager,
 		Scheme:             rs,
 		WatchFilterValue:   c.WatchFilterValue,
+		SchematicRegistrar: schematic.NewRegistrar(c.ImageFactoryURL),
+		FactoryURL:         c.ImageFactoryURL,
 	}).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: c.TinkerbellMachineConcurrency}, rs); err != nil {
 		return fmt.Errorf("unable to setup TinkerbellMachine controller:%w", err)
 	}
@@ -381,6 +385,12 @@ func (c *config) initFlags(fs *flag.FlagSet) { //nolint:funlen
 		"/var/run/secrets/external-tinkerbell/kubeconfig",
 		"Path to a kubeconfig file for an external Tinkerbell cluster.",
 	)
+
+	fs.StringVar(&c.ImageFactoryURL,
+		"image-factory-url",
+		schematic.DefaultFactoryURL,
+		"Talos Image Factory used to resolve schematics into installer and disk images. "+
+			"Point this at a self-hosted factory to keep the management cluster off the public internet.")
 }
 
 // initKlogFlags registers klog flags and opts into the new klog behavior so
