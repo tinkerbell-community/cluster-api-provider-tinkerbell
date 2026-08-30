@@ -144,6 +144,7 @@ func main() {
 	// Initialize event recorder.
 	// GetEventRecorderFor is deprecated in favor of GetEventRecorder, but
 	// record.InitFromRecorder requires the old record.EventRecorder type.
+	//nolint:staticcheck // SA1019
 	record.InitFromRecorder(mgr.GetEventRecorderFor("tinkerbell-controller"))
 
 	// Setup the context that's going to be used in controllers and for the manager.
