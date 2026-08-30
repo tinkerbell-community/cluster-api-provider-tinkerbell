@@ -47,13 +47,8 @@ func (scope *machineReconcileScope) reconcileInPlaceRecovery(hw *tinkv1.Hardware
 		return err
 	}
 
-	updating := false
-	if _, ok := machine.Annotations[clusterv1.UpdateInProgressAnnotation]; ok {
-		updating = true
-	}
-
-	annotations := scope.tinkerbellMachine.GetAnnotations()
-	_, attempted := annotations[InPlaceRecoveryAttemptedAnnotation]
+	_, updating := machine.Annotations[clusterv1.UpdateInProgressAnnotation]
+	_, attempted := scope.tinkerbellMachine.GetAnnotations()[InPlaceRecoveryAttemptedAnnotation]
 
 	if !updating {
 		// Nothing in flight. Clear the marker so a later update starts with a fresh budget.
@@ -64,12 +59,8 @@ func (scope *machineReconcileScope) reconcileInPlaceRecovery(hw *tinkv1.Hardware
 		return nil
 	}
 
-	if attempted {
-		return nil
-	}
-
-	started := inPlaceUpdateStartedAt(machine)
-	if started.IsZero() || time.Since(started) < timeout {
+	stalledFor, stalled := inPlaceUpdateStalledFor(machine, timeout)
+	if attempted || !stalled {
 		return nil
 	}
 
@@ -82,13 +73,27 @@ func (scope *machineReconcileScope) reconcileInPlaceRecovery(hw *tinkv1.Hardware
 
 	scope.log.Info("in-place update stalled, power cycling via BMC",
 		"machine", machine.Name,
-		"stalledFor", time.Since(started).String())
+		"stalledFor", stalledFor.String())
 
 	if err := scope.createPowerCycleJob(hw); err != nil {
 		return err
 	}
 
 	return scope.markRecoveryAttempted()
+}
+
+// inPlaceUpdateStalledFor reports how long the in-place update has been running, and whether
+// that has exceeded timeout. An update with no discernible start time is never treated as
+// stalled: without a start time there is no evidence the reboot has taken too long.
+func inPlaceUpdateStalledFor(machine *clusterv1.Machine, timeout time.Duration) (time.Duration, bool) {
+	started := inPlaceUpdateStartedAt(machine)
+	if started.IsZero() {
+		return 0, false
+	}
+
+	elapsed := time.Since(started)
+
+	return elapsed, elapsed >= timeout
 }
 
 // inPlaceUpdateStartedAt reports when the in-place update began.

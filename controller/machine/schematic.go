@@ -33,11 +33,7 @@ func (scope *machineReconcileScope) reconcileSchematic(hw *tinkv1.Hardware) erro
 		return nil
 	}
 
-	talosVersion, err := scope.talosVersion()
-	if err != nil {
-		return err
-	}
-
+	talosVersion := scope.talosVersion()
 	if talosVersion == "" {
 		scope.log.V(1).Info("no full Talos version available, skipping schematic resolution",
 			"machine", scope.tinkerbellMachine.Name)
@@ -78,9 +74,9 @@ func (scope *machineReconcileScope) reconcileSchematic(hw *tinkv1.Hardware) erro
 // spec.talosVersion works unchanged.
 //
 // An empty result means "not knowable", which callers treat as "do not resolve".
-func (scope *machineReconcileScope) talosVersion() (string, error) {
+func (scope *machineReconcileScope) talosVersion() string {
 	if scope.machine == nil || !scope.machine.Spec.Bootstrap.ConfigRef.IsDefined() {
-		return "", nil
+		return ""
 	}
 
 	ref := scope.machine.Spec.Bootstrap.ConfigRef
@@ -100,19 +96,19 @@ func (scope *machineReconcileScope) talosVersion() (string, error) {
 		// the schematic cannot be resolved yet.
 		scope.log.V(1).Info("could not read bootstrap config for Talos version", "error", err.Error())
 
-		return "", nil
+		return ""
 	}
 
 	version, found, err := unstructured.NestedString(obj.Object, "spec", "talosVersion")
 	if err != nil || !found {
-		return "", nil
+		return ""
 	}
 
 	if !fullTalosVersion.MatchString(version) {
-		return "", nil
+		return ""
 	}
 
-	return version, nil
+	return version
 }
 
 // parseMachineExtensions reads extra system extensions requested on the TinkerbellMachine,

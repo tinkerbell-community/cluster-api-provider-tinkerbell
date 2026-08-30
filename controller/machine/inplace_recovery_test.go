@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinkerbell/cluster-api-provider-tinkerbell/controller"
 	rufiov1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/bmc"
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	corev1 "k8s.io/api/core/v1"
@@ -14,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/tinkerbell/cluster-api-provider-tinkerbell/controller"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
@@ -119,6 +120,8 @@ func getRecoveryJob(t *testing.T, scope *machineReconcileScope) *rufiov1.Job {
 
 // A node that is merely slow to return must not be power cycled.
 func TestInPlaceRecovery_NoJobBeforeTimeout(t *testing.T) {
+	t.Parallel()
+
 	scope, hw := newRecoveryScope(t, true, 2*time.Minute, false)
 
 	if err := scope.reconcileInPlaceRecovery(hw, 20*time.Minute); err != nil {
@@ -130,7 +133,25 @@ func TestInPlaceRecovery_NoJobBeforeTimeout(t *testing.T) {
 	}
 }
 
+// The same machine that is within a 20 minute budget is stalled against a shorter one, so the
+// timeout is a real policy input rather than a hardcoded constant.
+func TestInPlaceRecovery_TimeoutIsHonored(t *testing.T) {
+	t.Parallel()
+
+	scope, hw := newRecoveryScope(t, true, 2*time.Minute, false)
+
+	if err := scope.reconcileInPlaceRecovery(hw, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	if job := getRecoveryJob(t, scope); job == nil {
+		t.Fatal("expected a power cycle job once the shorter timeout elapsed")
+	}
+}
+
 func TestInPlaceRecovery_NoJobWhenNotUpdating(t *testing.T) {
+	t.Parallel()
+
 	scope, hw := newRecoveryScope(t, false, time.Hour, false)
 
 	if err := scope.reconcileInPlaceRecovery(hw, 20*time.Minute); err != nil {
@@ -143,6 +164,8 @@ func TestInPlaceRecovery_NoJobWhenNotUpdating(t *testing.T) {
 }
 
 func TestInPlaceRecovery_PowerCyclesStalledMachine(t *testing.T) {
+	t.Parallel()
+
 	scope, hw := newRecoveryScope(t, true, time.Hour, false)
 
 	if err := scope.reconcileInPlaceRecovery(hw, 20*time.Minute); err != nil {
@@ -180,6 +203,8 @@ func TestInPlaceRecovery_PowerCyclesStalledMachine(t *testing.T) {
 // One power cycle, not an endless reboot loop: if the machine still has not returned, that is
 // for an operator to look at.
 func TestInPlaceRecovery_OnlyAttemptsOnce(t *testing.T) {
+	t.Parallel()
+
 	scope, hw := newRecoveryScope(t, true, time.Hour, true)
 
 	if err := scope.reconcileInPlaceRecovery(hw, 20*time.Minute); err != nil {
@@ -193,6 +218,8 @@ func TestInPlaceRecovery_OnlyAttemptsOnce(t *testing.T) {
 
 // Once the update finishes the marker is cleared, so a later update gets a fresh budget.
 func TestInPlaceRecovery_ClearsMarkerWhenUpdateFinishes(t *testing.T) {
+	t.Parallel()
+
 	scope, hw := newRecoveryScope(t, false, time.Hour, true)
 
 	if err := scope.reconcileInPlaceRecovery(hw, 20*time.Minute); err != nil {
@@ -212,6 +239,8 @@ func TestInPlaceRecovery_ClearsMarkerWhenUpdateFinishes(t *testing.T) {
 
 // Without a BMC there is nothing to power cycle; that must be reported, not crash.
 func TestInPlaceRecovery_NoBMCRef(t *testing.T) {
+	t.Parallel()
+
 	scope, hw := newRecoveryScope(t, true, time.Hour, false)
 	hw.Spec.BMCRef = nil
 

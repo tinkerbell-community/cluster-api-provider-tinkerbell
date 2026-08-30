@@ -151,6 +151,9 @@ func ConvertMachineToHub(src *TinkerbellMachine, dst *infrav2.TinkerbellMachine)
 		return err
 	} else if ok {
 		dst.Spec.TemplateRef = restored.Spec.TemplateRef
+		dst.Status.SchematicID = restored.Status.SchematicID
+		dst.Status.InstallerImage = restored.Status.InstallerImage
+		dst.Status.DiskImageURL = restored.Status.DiskImageURL
 	}
 
 	return nil

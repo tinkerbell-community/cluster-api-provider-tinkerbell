@@ -29,14 +29,16 @@ func hardware(annotations map[string]string, arch string, disks ...string) *tink
 	return hw
 }
 
-func extensionsFor(t *testing.T, hw *tinkv1.Hardware, extra ...string) []string {
+func extensionsFor(t *testing.T, hw *tinkv1.Hardware) []string {
 	t.Helper()
 
-	return schematic.Build(schematic.SignalsFromHardware(hw, extra)).
+	return schematic.Build(schematic.SignalsFromHardware(hw, nil)).
 		Customization.SystemExtensions.OfficialExtensions
 }
 
 func TestNVMeDiskAddsNVMeCLI(t *testing.T) {
+	t.Parallel()
+
 	got := extensionsFor(t, hardware(nil, "x86_64", "/dev/nvme0n1"))
 
 	if len(got) != 1 || got[0] != "siderolabs/nvme-cli" {
@@ -45,6 +47,8 @@ func TestNVMeDiskAddsNVMeCLI(t *testing.T) {
 }
 
 func TestNonNVMeDiskAddsNothing(t *testing.T) {
+	t.Parallel()
+
 	if got := extensionsFor(t, hardware(nil, "x86_64", "/dev/sda")); len(got) != 0 {
 		t.Fatalf("extensions = %v, want none", got)
 	}
@@ -52,6 +56,8 @@ func TestNonNVMeDiskAddsNothing(t *testing.T) {
 
 // A machine with mixed storage still needs the tooling.
 func TestMixedDisksAddNVMeCLI(t *testing.T) {
+	t.Parallel()
+
 	got := extensionsFor(t, hardware(nil, "x86_64", "/dev/sda", "/dev/nvme1n1"))
 
 	if len(got) != 1 || got[0] != "siderolabs/nvme-cli" {
@@ -60,6 +66,8 @@ func TestMixedDisksAddNVMeCLI(t *testing.T) {
 }
 
 func TestAnnotationExtensionsAreIncluded(t *testing.T) {
+	t.Parallel()
+
 	hw := hardware(map[string]string{
 		schematic.ExtensionsAnnotation: "siderolabs/gvisor, siderolabs/intel-ucode",
 	}, "x86_64")
@@ -80,6 +88,8 @@ func TestAnnotationExtensionsAreIncluded(t *testing.T) {
 
 // Built-in rules and operator-supplied extensions combine rather than override.
 func TestAnnotationAndRuleExtensionsMerge(t *testing.T) {
+	t.Parallel()
+
 	hw := hardware(map[string]string{
 		schematic.ExtensionsAnnotation: "siderolabs/gvisor",
 	}, "x86_64", "/dev/nvme0n1")
@@ -93,6 +103,8 @@ func TestAnnotationAndRuleExtensionsMerge(t *testing.T) {
 // Duplicates from different sources must collapse, or the schematic content changes and the
 // factory hands back a different ID for identical hardware.
 func TestDuplicateExtensionsAreDeduplicated(t *testing.T) {
+	t.Parallel()
+
 	hw := hardware(map[string]string{
 		schematic.ExtensionsAnnotation: "siderolabs/nvme-cli",
 	}, "x86_64", "/dev/nvme0n1")
@@ -105,6 +117,8 @@ func TestDuplicateExtensionsAreDeduplicated(t *testing.T) {
 // The whole scheme depends on this: identical hardware must always marshal identically, or
 // the resolved image would churn on every reconcile.
 func TestSchematicIsDeterministic(t *testing.T) {
+	t.Parallel()
+
 	hwA := hardware(map[string]string{
 		schematic.ExtensionsAnnotation: "siderolabs/gvisor,siderolabs/intel-ucode",
 	}, "x86_64", "/dev/nvme0n1")
@@ -129,6 +143,8 @@ func TestSchematicIsDeterministic(t *testing.T) {
 }
 
 func TestArchitectureMapping(t *testing.T) {
+	t.Parallel()
+
 	for arch, want := range map[string]string{
 		"x86_64":  "amd64",
 		"aarch64": "arm64",
@@ -144,6 +160,8 @@ func TestArchitectureMapping(t *testing.T) {
 }
 
 func TestImageReferences(t *testing.T) {
+	t.Parallel()
+
 	const id = "9ed5fecdacb36b5c5427b87d409f1065cfb2df69b0f71c58b868d9d466d8dab3"
 
 	installer := schematic.InstallerImage(schematic.DefaultFactoryURL, id, "v1.14.0-rc.1")
@@ -162,6 +180,8 @@ func TestImageReferences(t *testing.T) {
 }
 
 func TestRegisterUploadsOnceAndCaches(t *testing.T) {
+	t.Parallel()
+
 	var calls int
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -199,6 +219,8 @@ func TestRegisterUploadsOnceAndCaches(t *testing.T) {
 }
 
 func TestRegisterReportsFactoryErrors(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte("invalid schematic"))

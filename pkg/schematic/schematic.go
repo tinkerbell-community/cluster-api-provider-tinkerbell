@@ -43,6 +43,10 @@ const (
 	// boots from an NVMe disk without it. It adds the nvme(8) tooling, which is what makes a
 	// node with NVMe storage debuggable.
 	nvmeCLIExtension = "siderolabs/nvme-cli"
+
+	// archAMD64 and archARM64 are the Talos architecture names.
+	archAMD64 = "amd64"
+	archARM64 = "arm64"
 )
 
 // Signals are the facts about a machine that determine its schematic.
@@ -85,14 +89,14 @@ func architectureOf(hw *tinkv1.Hardware) string {
 		}
 
 		switch strings.ToLower(iface.DHCP.Arch) {
-		case "aarch64", "arm64":
-			return "arm64"
-		case "x86_64", "amd64", "x86":
-			return "amd64"
+		case "aarch64", archARM64:
+			return archARM64
+		case "x86_64", archAMD64, "x86":
+			return archAMD64
 		}
 	}
 
-	return "amd64"
+	return archAMD64
 }
 
 func parseExtensions(value string) []string {
