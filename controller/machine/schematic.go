@@ -35,13 +35,11 @@ func (scope *machineReconcileScope) reconcileSchematic(hw *tinkv1.Hardware) erro
 
 	talosVersion := scope.talosVersion()
 	if talosVersion == "" {
-		scope.log.Info("no full Talos version available, skipping schematic resolution",
+		scope.log.V(1).Info("no full Talos version available, skipping schematic resolution",
 			"machine", scope.tinkerbellMachine.Name)
 
 		return nil
 	}
-
-	scope.log.Info("resolving Image Factory schematic", "machine", scope.tinkerbellMachine.Name, "talosVersion", talosVersion)
 
 	signals := schematic.SignalsFromHardware(hw, parseMachineExtensions(scope.tinkerbellMachine.GetAnnotations()))
 
@@ -77,12 +75,7 @@ func (scope *machineReconcileScope) reconcileSchematic(hw *tinkv1.Hardware) erro
 //
 // An empty result means "not knowable", which callers treat as "do not resolve".
 func (scope *machineReconcileScope) talosVersion() string {
-	if scope.machine == nil {
-		scope.log.Info("talosVersion: owner Machine is nil")
-		return ""
-	}
-	if !scope.machine.Spec.Bootstrap.ConfigRef.IsDefined() {
-		scope.log.Info("talosVersion: bootstrap ConfigRef not defined")
+	if scope.machine == nil || !scope.machine.Spec.Bootstrap.ConfigRef.IsDefined() {
 		return ""
 	}
 
@@ -100,36 +93,24 @@ func (scope *machineReconcileScope) talosVersion() string {
 	key := types.NamespacedName{Namespace: scope.machine.Namespace, Name: ref.Name}
 	if err := scope.client.Get(scope.ctx, key, obj); err != nil {
 		// A missing or unreadable bootstrap config is not fatal to provisioning; it only means
-		// the schematic cannot be resolved yet.
-		scope.log.Info("talosVersion: could not read bootstrap config",
-			"group", ref.APIGroup, "kind", ref.Kind, "name", ref.Name, "error", err.Error())
+		// the schematic cannot be resolved yet. The controller's ClusterRole must grant
+		// get on talosconfigs.bootstrap.cluster.x-k8s.io (see the +kubebuilder:rbac marker on
+		// Reconcile) — a Forbidden here silently disables schematic resolution.
+		scope.log.V(1).Info("could not read bootstrap config for Talos version", "error", err.Error())
 
 		return ""
 	}
 
 	version, found, err := unstructured.NestedString(obj.Object, "spec", "talosVersion")
 	if err != nil || !found {
-		scope.log.Info("talosVersion: spec.talosVersion not found on bootstrap config",
-			"found", found, "err", err, "specKeys", specKeys(obj))
 		return ""
 	}
 
 	if !fullTalosVersion.MatchString(version) {
-		scope.log.Info("talosVersion: value is not a full version", "value", version)
 		return ""
 	}
 
 	return version
-}
-
-// specKeys lists the top-level spec field names for diagnostics.
-func specKeys(obj *unstructured.Unstructured) []string {
-	spec, _, _ := unstructured.NestedMap(obj.Object, "spec")
-	keys := make([]string, 0, len(spec))
-	for k := range spec {
-		keys = append(keys, k)
-	}
-	return keys
 }
 
 // parseMachineExtensions reads extra system extensions requested on the TinkerbellMachine,
