@@ -194,6 +194,20 @@ func (scope *machineReconcileScope) Reconcile() error {
 }
 
 func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nolint:cyclop // this is broken up as best as possible, at the moment.
+	// Resolve the Image Factory schematic on every reconcile, before anything
+	// else, so status.installerImage stays current even for an already
+	// provisioned machine. The bootstrap provider reads status.installerImage
+	// to decide whether an in-place Talos upgrade is needed; if this only ran
+	// for unprovisioned machines the installer image would be frozen at the
+	// provisioning-time version and a later talosVersion bump would never
+	// upgrade a running node. Resolution is deterministic and writes status
+	// only when the resolved value changes, so calling it here is idempotent
+	// and does NOT re-image a provisioned machine (that is still gated by the
+	// provisioned short-circuit below, which never creates a new Workflow).
+	if err := scope.reconcileSchematic(hw); err != nil {
+		return fmt.Errorf("reconciling Image Factory schematic: %w", err)
+	}
+
 	// If the workflow has completed the TinkerbellMachine is ready.
 	if v, found := hw.GetAnnotations()[HardwareProvisionedAnnotation]; found && v == "true" {
 		scope.log.Info("Marking TinkerbellMachine as Ready")
@@ -211,13 +225,6 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 		}
 
 		return nil
-	}
-
-	// Resolve the Image Factory schematic before the Workflow is created so the template can
-	// reference the resulting disk image, and so the installer image is on status for the
-	// bootstrap provider to pick up.
-	if err := scope.reconcileSchematic(hw); err != nil {
-		return fmt.Errorf("reconciling Image Factory schematic: %w", err)
 	}
 
 	wf, err := scope.ensureTemplateAndWorkflow(hw)
