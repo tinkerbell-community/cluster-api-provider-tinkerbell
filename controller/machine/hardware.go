@@ -33,6 +33,10 @@ const (
 	// HardwareProvisionedAnnotation signifies that the Hardware with this annotation has be provisioned by CAPT.
 	HardwareProvisionedAnnotation = "v1alpha1.tinkerbell.org/provisioned"
 
+	// HardwareProvisionedValue is the value HardwareProvisionedAnnotation carries once CAPT has
+	// finished provisioning the Hardware.
+	HardwareProvisionedValue = "true"
+
 	// HardwareTemplateOverrideAnnotation can be used to override the default Template used for provisioning.
 	HardwareTemplateOverrideAnnotation = "hardware.tinkerbell.org/capt-template-override"
 )
@@ -58,6 +62,11 @@ var (
 	// without surfacing a reconciliation error.
 	errHardwareClaimRequeue = errors.New("hardware claim requires requeue")
 )
+
+// hardwareProvisioned reports whether CAPT has finished provisioning the Hardware.
+func hardwareProvisioned(hw *tinkv1.Hardware) bool {
+	return hw.GetAnnotations()[HardwareProvisionedAnnotation] == HardwareProvisionedValue
+}
 
 // hardwareIP returns the IP address of the first network interface of the given hardware.
 func hardwareIP(hardware *tinkv1.Hardware) (string, error) {

@@ -48,11 +48,35 @@ record.
 ## Talos version
 
 The OS version comes from `talosVersion` on the machine's bootstrap config, read generically
-so any bootstrap provider exposing `spec.talosVersion` works.
+so any bootstrap provider exposing `spec.talosVersion` works. How that field is interpreted
+depends on how much of a version it names:
 
-It must be a **complete** version — `v1.14.0` or `v1.14.0-rc.1`. A bare minor like `v1.13` is
-a Talos config contract, not an OS version, and cannot be used to pull an image. When no full
-version is available, resolution is skipped and status is left empty rather than guessing:
+| `spec.talosVersion` | Resolves to |
+|---|---|
+| A complete version — `v1.14.0` or `v1.14.0-rc.1` | Used exactly, never bumped. An explicit pin is a deliberate choice to avoid surprise upgrades. |
+| A bare minor — `v1.13` | The newest GA patch in that minor (e.g. `v1.13.10`), so a newly released patch drives an in-place upgrade while the minor stays fixed. |
+| Empty, or `latest` | The newest GA minor available, pinned to the machine, then tracked by patch (see below). |
+
+The newest patch for a minor is discovered from the factory's `/versions` listing, filtered to
+General Availability releases — a pre-release such as `v1.14.0-rc.2` is never selected
+automatically (though it is honoured when pinned exactly). Because the version is resolved on
+every reconcile, a machine on a bare minor or `latest` follows new patches without any change to
+its spec.
+
+When the version is empty or `latest`, the newest GA **minor** is captured once and recorded on
+the `TinkerbellMachine` as the `talos.tinkerbell.org/contract` annotation. Later reconciles
+resolve the newest patch within that pinned minor rather than following new minors as they ship,
+so patch upgrades are automatic while crossing a minor stays a deliberate act — set
+`spec.talosVersion` to the new minor to move.
+
+The pin is established only for a machine that has not been provisioned yet, where the resolved
+version is what gets installed. An already-provisioned machine with no version set and no pin is
+left unresolved instead: its running OS minor is not known here, and publishing the factory's
+newest minor could ask the bootstrap provider to skip a minor, which Talos does not support. To
+adopt version tracking on an existing machine, set `spec.talosVersion` to its current minor.
+
+If the version cannot be resolved — the factory is unreachable and nothing is cached, or the
+minor has no GA release — resolution is skipped and status is left empty rather than guessing:
 pulling the wrong OS version is worse than letting the template's own default apply.
 
 ## Using it in a Workflow template

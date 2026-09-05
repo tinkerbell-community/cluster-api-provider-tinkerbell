@@ -34,6 +34,14 @@ const (
 	// declared here rather than guessed at.
 	ExtensionsAnnotation = "talos.tinkerbell.org/system-extensions"
 
+	// ContractAnnotation pins the Talos minor line a machine tracks, e.g. "v1.14".
+	//
+	// It is stamped the first time an unset Talos version is resolved, capturing the newest GA
+	// minor at that moment. Later reconciles resolve the newest patch within this minor rather
+	// than following new minors as they ship, so patch upgrades happen automatically while a
+	// minor upgrade stays a deliberate act.
+	ContractAnnotation = "talos.tinkerbell.org/contract"
+
 	// DefaultFactoryURL is the public Image Factory.
 	DefaultFactoryURL = "https://factory.talos.dev"
 

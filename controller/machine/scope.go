@@ -90,8 +90,11 @@ type machineReconcileScope struct {
 
 	// schematicRegistrar resolves Talos Image Factory schematics. Nil disables resolution.
 	schematicRegistrar *schematic.Registrar
-	factoryURL         string
-	watchManager       *tinkcluster.NamespaceWatchManager
+	// versionResolver turns an unset or minor-only Talos version into a concrete patch release.
+	// Nil disables resolution of anything but a fully pinned version.
+	versionResolver *schematic.VersionResolver
+	factoryURL      string
+	watchManager    *tinkcluster.NamespaceWatchManager
 }
 
 func (scope *machineReconcileScope) addFinalizer() error {
@@ -209,7 +212,7 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 	}
 
 	// If the workflow has completed the TinkerbellMachine is ready.
-	if v, found := hw.GetAnnotations()[HardwareProvisionedAnnotation]; found && v == "true" {
+	if hardwareProvisioned(hw) {
 		scope.log.Info("Marking TinkerbellMachine as Ready")
 		scope.tinkerbellMachine.Status.Ready = true
 		scope.tinkerbellMachine.Status.Initialization = &infrastructurev1.TinkerbellMachineInitializationStatus{
@@ -251,7 +254,7 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 			Provisioned: ptr.To(true),
 		}
 
-		if err := scope.patchHardwareAnnotations(hw, map[string]string{HardwareProvisionedAnnotation: "true"}); err != nil {
+		if err := scope.patchHardwareAnnotations(hw, map[string]string{HardwareProvisionedAnnotation: HardwareProvisionedValue}); err != nil {
 			return fmt.Errorf("failed to patch hardware: %w", err)
 		}
 

@@ -33,9 +33,9 @@ func (scope *machineReconcileScope) reconcileSchematic(hw *tinkv1.Hardware) erro
 		return nil
 	}
 
-	talosVersion := scope.talosVersion()
+	talosVersion := scope.resolveTalosVersion(hardwareProvisioned(hw))
 	if talosVersion == "" {
-		scope.log.V(1).Info("no full Talos version available, skipping schematic resolution",
+		scope.log.V(1).Info("no Talos version resolved, skipping schematic resolution",
 			"machine", scope.tinkerbellMachine.Name)
 
 		return nil
@@ -67,14 +67,95 @@ func (scope *machineReconcileScope) reconcileSchematic(hw *tinkv1.Hardware) erro
 	return nil
 }
 
-// talosVersion reads the target Talos version from the Machine's bootstrap config.
+// resolveTalosVersion resolves the concrete Talos OS version the machine installs and upgrades to.
+//
+//   - A fully pinned spec version (v1.13.9) is used exactly, never bumped: an explicit pin is a
+//     deliberate choice to avoid surprise upgrades.
+//   - A bare minor (v1.13) tracks the newest GA patch in that minor, so a new patch drives an
+//     in-place upgrade while a minor stays fixed.
+//   - An unset or "latest" spec pins the newest GA minor to the machine (see contractMinor) and
+//     tracks its newest patch thereafter.
+//
+// An empty result means "not knowable", which callers treat as "do not resolve": pulling the
+// wrong OS version is worse than leaving the field for the template's own default.
+func (scope *machineReconcileScope) resolveTalosVersion(provisioned bool) string {
+	raw := scope.specTalosVersion()
+
+	if fullTalosVersion.MatchString(raw) {
+		return raw
+	}
+
+	// Anything but a full pin needs the factory to turn a minor or "latest" into a real patch.
+	if scope.versionResolver == nil {
+		return ""
+	}
+
+	floor := raw
+	if floor == "" || floor == "latest" {
+		floor = scope.contractMinor(provisioned)
+	}
+
+	resolved, err := scope.versionResolver.LatestPatch(scope.ctx, floor)
+	if err != nil {
+		scope.log.V(1).Info("could not resolve latest Talos patch, skipping schematic resolution",
+			"floor", floor, "error", err.Error())
+
+		return ""
+	}
+
+	return resolved
+}
+
+// contractMinor returns the Talos minor line an unset machine tracks.
+//
+// The newest GA minor is pinned to the machine on first resolution so it does not follow new
+// minors as they are released; crossing a minor then requires deliberately setting the version.
+// An empty result means the newest minor could not be determined yet.
+//
+// A new pin is established only for a machine that is not yet provisioned. An already-provisioned
+// machine's running OS minor is not known here, so pinning the factory's newest minor could ask
+// the bootstrap provider to skip a minor, which Talos does not support; such a machine is left
+// unresolved (the pre-feature behavior) until its version is set deliberately. A fresh machine is
+// installed at the pin, so there is no jump.
+func (scope *machineReconcileScope) contractMinor(provisioned bool) string {
+	if pinned := scope.tinkerbellMachine.GetAnnotations()[schematic.ContractAnnotation]; pinned != "" {
+		return pinned
+	}
+
+	if provisioned {
+		return ""
+	}
+
+	minor, err := scope.versionResolver.LatestMinor(scope.ctx)
+	if err != nil {
+		scope.log.V(1).Info("could not resolve newest Talos minor", "error", err.Error())
+
+		return ""
+	}
+
+	if minor == "" {
+		return ""
+	}
+
+	annotations := scope.tinkerbellMachine.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
+	annotations[schematic.ContractAnnotation] = minor
+	scope.tinkerbellMachine.SetAnnotations(annotations)
+
+	return minor
+}
+
+// specTalosVersion reads spec.talosVersion from the Machine's bootstrap config.
 //
 // The bootstrap object is read as unstructured on purpose: the infrastructure provider has no
 // business importing a bootstrap provider's types, and any bootstrap provider exposing
 // spec.talosVersion works unchanged.
 //
-// An empty result means "not knowable", which callers treat as "do not resolve".
-func (scope *machineReconcileScope) talosVersion() string {
+// An empty result means the version is unset or the bootstrap config is not readable yet.
+func (scope *machineReconcileScope) specTalosVersion() string {
 	if scope.machine == nil || !scope.machine.Spec.Bootstrap.ConfigRef.IsDefined() {
 		return ""
 	}
@@ -103,10 +184,6 @@ func (scope *machineReconcileScope) talosVersion() string {
 
 	version, found, err := unstructured.NestedString(obj.Object, "spec", "talosVersion")
 	if err != nil || !found {
-		return ""
-	}
-
-	if !fullTalosVersion.MatchString(version) {
 		return ""
 	}
 

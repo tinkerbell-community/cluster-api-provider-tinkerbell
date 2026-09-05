@@ -73,6 +73,9 @@ type TinkerbellMachineReconciler struct {
 	// SchematicRegistrar resolves Talos Image Factory schematics from hardware
 	// characteristics. Nil disables resolution, leaving templates to supply their own image.
 	SchematicRegistrar *schematic.Registrar
+	// VersionResolver turns an unset or minor-only Talos version into a concrete patch release.
+	// Nil disables resolution of anything but a fully pinned version.
+	VersionResolver *schematic.VersionResolver
 	// FactoryURL is the Image Factory used to build image references.
 	FactoryURL string
 }
@@ -112,6 +115,7 @@ func (r *TinkerbellMachineReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		externalTinkerbell: r.ExternalTinkerbell,
 		watchManager:       r.WatchManager,
 		schematicRegistrar: r.SchematicRegistrar,
+		versionResolver:    r.VersionResolver,
 		factoryURL:         r.FactoryURL,
 	}
 

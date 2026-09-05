@@ -196,6 +196,7 @@ func (c *config) setupReconcilers(ctx context.Context, log logr.Logger, rs *runt
 		Scheme:             rs,
 		WatchFilterValue:   c.WatchFilterValue,
 		SchematicRegistrar: schematic.NewRegistrar(c.ImageFactoryURL),
+		VersionResolver:    schematic.NewVersionResolver(c.ImageFactoryURL),
 		FactoryURL:         c.ImageFactoryURL,
 	}).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: c.TinkerbellMachineConcurrency}, rs); err != nil {
 		return fmt.Errorf("unable to setup TinkerbellMachine controller:%w", err)
