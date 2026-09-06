@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -32,6 +33,7 @@ import (
 	cgrecord "k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	capifeature "sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/util/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -144,7 +146,6 @@ func main() {
 	// Initialize event recorder.
 	// GetEventRecorderFor is deprecated in favor of GetEventRecorder, but
 	// record.InitFromRecorder requires the old record.EventRecorder type.
-	//nolint:staticcheck // SA1019
 	record.InitFromRecorder(mgr.GetEventRecorderFor("tinkerbell-controller"))
 
 	// Setup the context that's going to be used in controllers and for the manager.
@@ -398,6 +399,34 @@ func (c *config) initFlags(fs *flag.FlagSet) { //nolint:funlen
 		schematic.DefaultFactoryURL,
 		"Talos Image Factory used to resolve schematics into installer and disk images. "+
 			"Point this at a self-hosted factory to keep the management cluster off the public internet.")
+
+	fs.Var(featureGatesFlag{},
+		"feature-gates",
+		"A set of key=value pairs that describe feature gates for various features. "+
+			"CAPT consumes no gates itself; the flag is accepted so management tooling such as the "+
+			"Cluster API operator can set the standard Cluster API gates uniformly across providers. "+
+			"Options are:\n"+strings.Join(capifeature.MutableGates.KnownFeatures(), "\n"))
+}
+
+// featureGatesFlag adapts the Cluster API mutable feature gates to the standard
+// library's flag.Value, which featuregate.MutableFeatureGate does not satisfy
+// on its own (no String method on the interface).
+type featureGatesFlag struct{}
+
+func (featureGatesFlag) Set(value string) error {
+	if err := capifeature.MutableGates.Set(value); err != nil {
+		return fmt.Errorf("setting feature gates: %w", err)
+	}
+
+	return nil
+}
+
+func (featureGatesFlag) String() string {
+	if s, ok := capifeature.MutableGates.(fmt.Stringer); ok {
+		return s.String()
+	}
+
+	return ""
 }
 
 // initKlogFlags registers klog flags and opts into the new klog behavior so
