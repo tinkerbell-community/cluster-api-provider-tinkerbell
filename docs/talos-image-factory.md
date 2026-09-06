@@ -81,20 +81,25 @@ pulling the wrong OS version is worse than letting the template's own default ap
 
 ## Using it in a Workflow template
 
-The resolved values are exposed as Workflow template data:
+The resolved values are **not** injected into the Workflow's `hardwareMap` — the map carries
+only `device_1`. Provisioning templates read the image identity from the Hardware's own
+metadata (`spec.metadata.instance.operating_system`), which the `talos-image-resolver`
+runtime extension writes for claimed Hardware:
 
 ```yaml
 actions:
   - name: stream-talos
     image: quay.io/tinkerbell/actions/image2disk
     environment:
-      IMG_URL: "{{ .diskImageURL }}"
-      DEST_DISK: /dev/nvme0n1
+      IMG_URL: 'https://factory.talos.dev/image/{{ .Hardware.Metadata.Instance.OperatingSystem.Slug }}/{{ .Hardware.Metadata.Instance.OperatingSystem.Version }}/metal-{{ .Hardware.Metadata.Instance.OperatingSystem.OsSlug | splitList "-" | last }}.raw.zst'
+      DEST_DISK: "{{ index .Hardware.Disks 0 }}"
       COMPRESSED: "true"
 ```
 
-A template that does not reference these keys is unaffected — they are simply absent when
-resolution has not run.
+Keeping the template's inputs on the Hardware means the rendered image cannot depend on this
+controller's resolution timing; the runtime extension's Workflow-CREATE admission gate holds
+the render until the block is present. The `status` fields above remain the upgrade-path
+rendezvous read by the bootstrap provider.
 
 ### Alternative: run the installer directly
 
@@ -111,7 +116,7 @@ means one artefact installs *and* upgrades a machine, so the two cannot drift:
 ```yaml
 actions:
   - name: install-talos
-    image: factory.talos.dev/metal-installer/{{ .schematicID }}:v1.14.0-rc.1
+    image: factory.talos.dev/metal-installer/{{ .Hardware.Metadata.Instance.OperatingSystem.Slug }}:v1.14.0-rc.1
     command:
       - /bin/installer
       - install

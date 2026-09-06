@@ -127,20 +127,10 @@ func (scope *machineReconcileScope) removeWorkflow() error {
 
 // workflowTemplateData is the substitution data made available to the Workflow's Template.
 //
-// Alongside the hardware identifier it exposes the resolved Image Factory artefacts, so a
-// template can write the correct Talos image with {{ .diskImageURL }} rather than hardcoding
-// a version and extension set that then drifts from what the machine is later upgraded to.
-// The schematic keys are omitted when resolution has not happened, which keeps a template
-// that does not reference them working exactly as before.
+// It carries only the hardware identifier. Image identity reaches the template through
+// Hardware.spec.metadata.instance.operating_system ({{ .Hardware.Metadata.Instance.… }}),
+// written by the talos-image-resolver runtime extension — never through hardwareMap, so
+// the template's image reference cannot depend on this controller's resolution timing.
 func (scope *machineReconcileScope) workflowTemplateData(hw *tinkv1.Hardware) map[string]string {
-	data := map[string]string{"device_1": hw.Spec.Metadata.Instance.ID}
-
-	status := scope.tinkerbellMachine.Status
-	if status.SchematicID != "" {
-		data["schematicID"] = status.SchematicID
-		data["installerImage"] = status.InstallerImage
-		data["diskImageURL"] = status.DiskImageURL
-	}
-
-	return data
+	return map[string]string{"device_1": hw.Spec.Metadata.Instance.ID}
 }
