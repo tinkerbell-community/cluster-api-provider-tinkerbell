@@ -354,6 +354,12 @@ func (scope *machineReconcileScope) releaseHardware(hw *tinkv1.Hardware) error {
 	delete(hw.Labels, HardwareOwnerNamespaceLabel)
 	delete(hw.Annotations, HardwareProvisionedAnnotation)
 
+	// CAPT is the sole writer of userData; clearing it in the same patch that
+	// releases the Hardware keeps the machine configuration (cluster PKI,
+	// bootstrap token) from being served by hegel to whatever boots this
+	// hardware next.
+	hw.Spec.UserData = nil
+
 	controllerutil.RemoveFinalizer(hw, infrastructurev1.MachineFinalizer)
 	controllerutil.RemoveFinalizer(hw, infrastructurev1.MachineLegacyFinalizer)
 

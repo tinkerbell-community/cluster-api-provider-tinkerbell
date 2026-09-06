@@ -808,6 +808,11 @@ func Test_Machine_reconciliation_when_machine_is_scheduled_for_removal_it(t *tes
 	updatedMachine := &infrastructurev1.TinkerbellMachine{}
 	g.Expect(client.Get(ctx, tinkerbellMachineNamespacedName, updatedMachine)).To(Succeed())
 
+	claimedHardware := &tinkv1.Hardware{}
+	g.Expect(client.Get(ctx, types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace}, claimedHardware)).To(Succeed())
+	g.Expect(claimedHardware.Spec.UserData).NotTo(BeNil(),
+		"claiming the hardware should have written user data; without it the release assertions below are vacuous")
+
 	g.Expect(client.Delete(ctx, updatedMachine)).To(Succeed())
 	_, err = reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -835,6 +840,14 @@ func Test_Machine_reconciliation_when_machine_is_scheduled_for_removal_it(t *tes
 			"Found hardware owner name label")
 		g.Expect(updatedHardware.ObjectMeta.Labels).NotTo(HaveKey(machine.HardwareOwnerNamespaceLabel),
 			"Found hardware owner namespace label")
+	})
+
+	t.Run("clears_user_data_from_hardware", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		g.Expect(updatedHardware.Spec.UserData).To(BeNil(),
+			"released hardware must not keep the machine configuration; hegel would serve it to the next netboot")
 	})
 }
 
