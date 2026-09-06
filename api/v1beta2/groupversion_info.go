@@ -35,6 +35,8 @@ var (
 		s.AddKnownTypes(GroupVersion,
 			&TinkerbellCluster{},
 			&TinkerbellClusterList{},
+			&TinkerbellClusterTemplate{},
+			&TinkerbellClusterTemplateList{},
 			&TinkerbellMachine{},
 			&TinkerbellMachineList{},
 			&TinkerbellMachineTemplate{},

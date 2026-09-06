@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/infrastructure.cluster.x-k8s.io_tinkerbellclusters.yaml
+- bases/infrastructure.cluster.x-k8s.io_tinkerbellclustertemplates.yaml
 - bases/infrastructure.cluster.x-k8s.io_tinkerbellmachines.yaml
 - bases/infrastructure.cluster.x-k8s.io_tinkerbellmachinetemplates.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
