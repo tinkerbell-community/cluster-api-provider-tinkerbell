@@ -240,6 +240,13 @@ func setupWebhooks(mgr ctrl.Manager) error {
 		return fmt.Errorf("unable to setup TinkerbellCluster webhook:%w", err)
 	}
 
+	// TinkerbellClusterTemplate is v1beta2-only, so it has no converter.
+	if err := ctrl.NewWebhookManagedBy(mgr, &infrastructurev1.TinkerbellClusterTemplate{}).
+		WithValidator(&tinkerbellwebhooks.TinkerbellClusterTemplate{}).
+		Complete(); err != nil {
+		return fmt.Errorf("unable to setup TinkerbellClusterTemplate webhook:%w", err)
+	}
+
 	if err := ctrl.NewWebhookManagedBy(mgr, &infrastructurev1.TinkerbellMachine{}).
 		WithValidator(&tinkerbellwebhooks.TinkerbellMachine{}).
 		WithConverter(captconversion.NewTinkerbellMachineConverter()).

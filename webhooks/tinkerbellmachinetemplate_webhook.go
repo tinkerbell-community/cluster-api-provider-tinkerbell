@@ -19,9 +19,7 @@ package webhooks
 import (
 	"context"
 	"fmt"
-	"reflect"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -54,17 +52,17 @@ func (w *TinkerbellMachineTemplate) ValidateCreate(_ context.Context, _ *infrast
 	return nil, nil
 }
 
-// ValidateUpdate implements admission.Validator.
+// ValidateUpdate implements admission.Validator. See validateTemplateSpecImmutable for what is
+// frozen and why topology dry-run requests are exempted.
 func (w *TinkerbellMachineTemplate) ValidateUpdate(
-	_ context.Context,
+	ctx context.Context,
 	oldTMT *infrastructurev1.TinkerbellMachineTemplate,
 	newTMT *infrastructurev1.TinkerbellMachineTemplate,
 ) (admission.Warnings, error) {
-	if !reflect.DeepEqual(newTMT.Spec, oldTMT.Spec) {
-		return nil, apierrors.NewBadRequest("TinkerbellMachineTemplate.Spec is immutable")
-	}
-
-	return nil, nil
+	return nil, validateTemplateSpecImmutable(
+		ctx, "TinkerbellMachineTemplate", newTMT,
+		oldTMT.Spec.Template.Spec, newTMT.Spec.Template.Spec,
+	)
 }
 
 // ValidateDelete implements admission.Validator.

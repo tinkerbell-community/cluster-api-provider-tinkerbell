@@ -104,6 +104,12 @@ linters:
           - lll
           - funlen
         path: controller/*/(.+)_test.go
+      # admission.Validator is generic over the API type, so every template kind needs its own
+      # struct and method set. The behaviour they share already lives in one place
+      # (webhooks.validateTemplateSpecImmutable); what is left is unavoidable boilerplate.
+      - linters:
+          - dupl
+        path: webhooks/tinkerbell(cluster|machine)template_webhook\.go
     paths:
       - zz_generated.*\.go$
       - .*conversion.*\.go$
