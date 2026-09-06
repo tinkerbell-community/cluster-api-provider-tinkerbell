@@ -38,7 +38,6 @@ import (
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	tinkcluster "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/cluster"
-	"github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/schematic"
 )
 
 const (
@@ -88,13 +87,7 @@ type machineReconcileScope struct {
 	tinkerbellClient   client.Client
 	externalTinkerbell bool // true when tinkerbellClient targets an external cluster
 
-	// schematicRegistrar resolves Talos Image Factory schematics. Nil disables resolution.
-	schematicRegistrar *schematic.Registrar
-	// versionResolver turns an unset or minor-only Talos version into a concrete patch release.
-	// Nil disables resolution of anything but a fully pinned version.
-	versionResolver *schematic.VersionResolver
-	factoryURL      string
-	watchManager    *tinkcluster.NamespaceWatchManager
+	watchManager *tinkcluster.NamespaceWatchManager
 }
 
 func (scope *machineReconcileScope) addFinalizer() error {
@@ -197,20 +190,6 @@ func (scope *machineReconcileScope) Reconcile() error {
 }
 
 func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nolint:cyclop // this is broken up as best as possible, at the moment.
-	// Resolve the Image Factory schematic on every reconcile, before anything
-	// else, so status.installerImage stays current even for an already
-	// provisioned machine. The bootstrap provider reads status.installerImage
-	// to decide whether an in-place Talos upgrade is needed; if this only ran
-	// for unprovisioned machines the installer image would be frozen at the
-	// provisioning-time version and a later talosVersion bump would never
-	// upgrade a running node. Resolution is deterministic and writes status
-	// only when the resolved value changes, so calling it here is idempotent
-	// and does NOT re-image a provisioned machine (that is still gated by the
-	// provisioned short-circuit below, which never creates a new Workflow).
-	if err := scope.reconcileSchematic(hw); err != nil {
-		return fmt.Errorf("reconciling Image Factory schematic: %w", err)
-	}
-
 	// If the workflow has completed the TinkerbellMachine is ready.
 	if hardwareProvisioned(hw) {
 		scope.log.Info("Marking TinkerbellMachine as Ready")

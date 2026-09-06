@@ -44,7 +44,6 @@ import (
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	tinkcluster "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/cluster"
-	"github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/schematic"
 )
 
 const (
@@ -70,14 +69,6 @@ type TinkerbellMachineReconciler struct {
 	Scheme           *runtime.Scheme
 	WatchFilterValue string
 
-	// SchematicRegistrar resolves Talos Image Factory schematics from hardware
-	// characteristics. Nil disables resolution, leaving templates to supply their own image.
-	SchematicRegistrar *schematic.Registrar
-	// VersionResolver turns an unset or minor-only Talos version into a concrete patch release.
-	// Nil disables resolution of anything but a fully pinned version.
-	VersionResolver *schematic.VersionResolver
-	// FactoryURL is the Image Factory used to build image references.
-	FactoryURL string
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=tinkerbellmachines,verbs=get;list;watch;create;update;patch;delete
@@ -88,7 +79,6 @@ type TinkerbellMachineReconciler struct {
 // +kubebuilder:rbac:groups=tinkerbell.org,resources=templates;templates/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tinkerbell.org,resources=workflows;workflows/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bmc.tinkerbell.org,resources=jobs,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups=bootstrap.cluster.x-k8s.io,resources=talosconfigs,verbs=get;list;watch
 
 // Reconcile ensures that all Tinkerbell machines are aligned with a given spec.
 //
@@ -114,9 +104,6 @@ func (r *TinkerbellMachineReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		tinkerbellClient:   r.TinkerbellClient,
 		externalTinkerbell: r.ExternalTinkerbell,
 		watchManager:       r.WatchManager,
-		schematicRegistrar: r.SchematicRegistrar,
-		versionResolver:    r.VersionResolver,
-		factoryURL:         r.FactoryURL,
 	}
 
 	if err := r.Get(ctx, req.NamespacedName, scope.tinkerbellMachine); err != nil {
