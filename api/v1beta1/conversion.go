@@ -203,6 +203,7 @@ func ConvertMachineTemplateToHub(src *TinkerbellMachineTemplate, dst *infrav2.Ti
 	if ok, err := unmarshalData(src, restored); err != nil {
 		return err
 	} else if ok {
+		dst.Spec.Template.ObjectMeta = restored.Spec.Template.ObjectMeta
 		dst.Spec.Template.Spec.TemplateRef = restored.Spec.Template.Spec.TemplateRef
 	}
 
@@ -215,6 +216,7 @@ func ConvertMachineTemplateFromHub(dst *TinkerbellMachineTemplate, src *infrav2.
 
 	// v1beta2 TinkerbellMachineConfig → v1beta1 TinkerbellMachineSpec.
 	// HardwareName and ProviderID default to zero values.
+	// spec.template.metadata is v1beta2-only — stashed via marshalData.
 	srcSpec := src.Spec.Template.Spec
 	dst.Spec.Template.Spec.TemplateOverride = srcSpec.TemplateInline
 	// TemplateRef is v1beta2-only — stashed via MarshalData.

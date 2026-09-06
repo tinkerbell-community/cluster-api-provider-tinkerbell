@@ -16,6 +16,10 @@ limitations under the License.
 
 package v1beta2
 
+import (
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+)
+
 // TinkerbellResourceStatus describes the status of a Tinkerbell resource.
 type TinkerbellResourceStatus int
 
@@ -39,6 +43,10 @@ const (
 // with HardwareName and ProviderID absent (zero-valued), which is correct since
 // the controller sets them later during hardware selection.
 type TinkerbellMachineTemplateResource struct {
+	// Standard object's metadata applied to TinkerbellMachines created from this template.
+	// +optional
+	ObjectMeta clusterv1.ObjectMeta `json:"metadata,omitempty,omitzero"`
+
 	// Spec is the specification of the desired behavior of the machine.
 	Spec TinkerbellMachineConfig `json:"spec"`
 }
