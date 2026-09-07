@@ -42,6 +42,30 @@ replacements:
         options:
           delimiter: /
           index: 1
+      - select:
+          kind: CustomResourceDefinition
+          name: tinkerbellclusters.infrastructure.cluster.x-k8s.io
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 1
+      - select:
+          kind: CustomResourceDefinition
+          name: tinkerbellmachines.infrastructure.cluster.x-k8s.io
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 1
+      - select:
+          kind: CustomResourceDefinition
+          name: tinkerbellmachinetemplates.infrastructure.cluster.x-k8s.io
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 1
   - source:
       fieldPath: metadata.namespace
       kind: Certificate
@@ -55,6 +79,30 @@ replacements:
         select:
           kind: ValidatingWebhookConfiguration
           name: validating-webhook-configuration
+      - select:
+          kind: CustomResourceDefinition
+          name: tinkerbellclusters.infrastructure.cluster.x-k8s.io
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 0
+      - select:
+          kind: CustomResourceDefinition
+          name: tinkerbellmachines.infrastructure.cluster.x-k8s.io
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 0
+      - select:
+          kind: CustomResourceDefinition
+          name: tinkerbellmachinetemplates.infrastructure.cluster.x-k8s.io
+        fieldPaths:
+          - metadata.annotations.[cert-manager.io/inject-ca-from]
+        options:
+          delimiter: /
+          index: 0
   - source:
       kind: Certificate
       name: serving-cert
