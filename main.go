@@ -33,6 +33,7 @@ import (
 	cgrecord "k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
 	capifeature "sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/util/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -452,6 +453,9 @@ func newScheme() (*runtime.Scheme, error) {
 	}
 	if err := clusterv1.AddToScheme(rs); err != nil {
 		return nil, fmt.Errorf("failed to add clusterv1 scheme: err: %w", err)
+	}
+	if err := ipamv1.AddToScheme(rs); err != nil {
+		return nil, fmt.Errorf("failed to add ipamv1 scheme: err: %w", err)
 	}
 	if err := captctrl.AddToSchemeTinkerbell(rs); err != nil {
 		return nil, fmt.Errorf("failed to add Tinkerbell scheme: err: %w", err)

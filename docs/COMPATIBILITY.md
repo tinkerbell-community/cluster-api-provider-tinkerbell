@@ -32,6 +32,7 @@ conversion between versions.
 | `status.instanceStatus` | `status.state` | Renamed, same underlying type |
 | `imageLookup*` fields | *(removed)* | Dropped during up-conversion; not round-trippable |
 | `TinkerbellMachineSpec` (in templates) | `TinkerbellMachineConfig` | `hardwareName`/`providerID` excluded from templates |
+| *(none)* | `addressFromPool` | v1beta2-only; preserved across a v1beta1 round-trip through the conversion annotation. See [IPAM.md](IPAM.md) |
 
 The conversion functions are plain exported functions in the `api/v1beta1`
 package (e.g. `ConvertClusterToHub`, `ConvertClusterFromHub`). The conversion

@@ -41,6 +41,7 @@ import (
 
 	rufiov1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/bmc"
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	tinkcluster "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/cluster"
@@ -54,6 +55,10 @@ const (
 	// LabelMachineNamespace is the label key used on Tinkerbell resources to identify
 	// the owning TinkerbellMachine by namespace.
 	LabelMachineNamespace = "capt.tinkerbell.org/machine-namespace"
+
+	// IPAddressRequeueAfter bounds the wait for an IPAM provider to bind a claim. The owner
+	// watch on IPAddressClaim is the fast path; this is the backstop.
+	IPAddressRequeueAfter = 30 * time.Second
 )
 
 // TinkerbellMachineReconciler implements Reconciler interface by managing Tinkerbell machines.
@@ -85,6 +90,8 @@ type TinkerbellMachineReconciler struct {
 // +kubebuilder:rbac:groups=tinkerbell.org,resources=templates;templates/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tinkerbell.org,resources=workflows;workflows/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bmc.tinkerbell.org,resources=jobs,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=ipam.cluster.x-k8s.io,resources=ipaddressclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ipam.cluster.x-k8s.io,resources=ipaddresses,verbs=get;list;watch
 
 // Reconcile ensures that all Tinkerbell machines are aligned with a given spec.
 //
@@ -209,6 +216,12 @@ func (r *TinkerbellMachineReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 
+		if errors.Is(err, errWaitingForIPAddress) {
+			log.Info("waiting for IP address allocation", "reason", err.Error())
+
+			return ctrl.Result{RequeueAfter: IPAddressRequeueAfter}, nil
+		}
+
 		return ctrl.Result{}, err
 	}
 
@@ -246,6 +259,17 @@ func (r *TinkerbellMachineReconciler) SetupWithManager(ctx context.Context, mgr 
 			&clusterv1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(clusterToObjectFunc),
 			builder.WithPredicates(predicates.ClusterPausedTransitionsOrInfrastructureProvisioned(sm, log)),
+		).
+		// Claims live on the management cluster and are controller-owned by the machine, so
+		// the provider binding an address wakes the machine without a resync.
+		Watches(
+			&ipamv1.IPAddressClaim{},
+			handler.EnqueueRequestForOwner(
+				mgr.GetScheme(),
+				mgr.GetRESTMapper(),
+				&infrastructurev1.TinkerbellMachine{},
+				handler.OnlyControllerOwner(),
+			),
 		)
 
 	// In local mode, watch Workflow and Job objects via owner references on the

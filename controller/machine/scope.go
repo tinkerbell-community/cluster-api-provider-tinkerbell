@@ -88,6 +88,10 @@ type machineReconcileScope struct {
 	tinkerbellClient   client.Client
 	externalTinkerbell bool // true when tinkerbellClient targets an external cluster
 
+	// reservedAddress is the IPAM address applied to the Hardware during this reconcile, found
+	// by MAC rather than position. Nil when no pool is configured.
+	reservedAddress *tinkv1.IP
+
 	// schematicRegistrar resolves Talos Image Factory schematics. Nil disables resolution.
 	schematicRegistrar *schematic.Registrar
 	factoryURL         string
@@ -190,6 +194,16 @@ func (scope *machineReconcileScope) Reconcile() error {
 		return fmt.Errorf("failed to ensure hardware: %w", err)
 	}
 
+	// The address must be known before status reports it and before the Workflow that
+	// installs with it is created.
+	if err := scope.reconcileIPAM(hw); err != nil {
+		return fmt.Errorf("reconciling IPAM: %w", err)
+	}
+
+	if err := scope.setStatus(hw); err != nil {
+		return fmt.Errorf("setting machine status: %w", err)
+	}
+
 	return scope.reconcile(hw)
 }
 
@@ -268,7 +282,7 @@ func (scope *machineReconcileScope) setStatus(hw *tinkv1.Hardware) error {
 		}
 	}
 
-	ip, err := hardwareIP(hw)
+	ip, err := scope.machineAddress(hw)
 	if err != nil {
 		return fmt.Errorf("extracting Hardware IP address: %w", err)
 	}
@@ -281,6 +295,17 @@ func (scope *machineReconcileScope) setStatus(hw *tinkv1.Hardware) error {
 	}
 
 	return scope.patch()
+}
+
+// machineAddress is the address reported for the machine: the IPAM reservation applied this
+// reconcile when there is one (it lives on whichever interface carries the claimed MAC, not
+// necessarily the first), otherwise the first interface's DHCP address as before.
+func (scope *machineReconcileScope) machineAddress(hw *tinkv1.Hardware) (string, error) {
+	if scope.reservedAddress != nil {
+		return scope.reservedAddress.Address, nil
+	}
+
+	return hardwareIP(hw)
 }
 
 // MachineScheduledForDeletion implements machineReconcileContext interface method
@@ -319,7 +344,7 @@ func (scope *machineReconcileScope) DeleteMachineWithDependencies() error { //no
 			return err
 		}
 
-		return scope.removeFinalizer()
+		return scope.releaseClaimAndFinalizer()
 	}
 
 	if err := scope.removeDependencies(); err != nil {
@@ -336,7 +361,7 @@ func (scope *machineReconcileScope) DeleteMachineWithDependencies() error { //no
 			return fmt.Errorf("error releasing Hardware: %w", err)
 		}
 
-		return scope.removeFinalizer()
+		return scope.releaseClaimAndFinalizer()
 	}
 
 	if err := scope.ensureBMCJobCompletionForDelete(hw); err != nil {
@@ -347,7 +372,7 @@ func (scope *machineReconcileScope) DeleteMachineWithDependencies() error { //no
 		return fmt.Errorf("error releasing Hardware: %w", err)
 	}
 
-	if err := scope.removeFinalizer(); err != nil {
+	if err := scope.releaseClaimAndFinalizer(); err != nil {
 		return fmt.Errorf("error removing finalizer: %w", err)
 	}
 
@@ -365,6 +390,16 @@ func (scope *machineReconcileScope) removeDependencies() error {
 	}
 
 	return nil
+}
+
+// releaseClaimAndFinalizer gives back what the machine holds on the management cluster and
+// lets the TinkerbellMachine go: the IPAM claim first, then the finalizer.
+func (scope *machineReconcileScope) releaseClaimAndFinalizer() error {
+	if err := scope.releaseIPAddressClaim(); err != nil {
+		return fmt.Errorf("releasing IPAddressClaim: %w", err)
+	}
+
+	return scope.removeFinalizer()
 }
 
 func (scope *machineReconcileScope) removeFinalizer() error {

@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -62,6 +63,12 @@ func (w *TinkerbellMachine) ValidateUpdate(_ context.Context, old *infrastructur
 
 	if old.Spec.ProviderID != "" && newTM.Spec.ProviderID != old.Spec.ProviderID {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "providerID"), "is immutable once set"))
+	}
+
+	// A claim may exist once hardware is selected; changing the pool would orphan it and the
+	// reservation written from it.
+	if old.Spec.HardwareName != "" && !ptr.Equal(old.Spec.AddressFromPool, newTM.Spec.AddressFromPool) {
+		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "addressFromPool"), "is immutable once hardware is selected"))
 	}
 
 	return nil, aggregateObjErrors(newTM.GroupVersionKind().GroupKind(), newTM.Name, allErrs)

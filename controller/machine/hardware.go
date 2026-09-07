@@ -223,7 +223,7 @@ func (scope *machineReconcileScope) ensureHardware() (*tinkv1.Hardware, error) {
 		return nil, fmt.Errorf("ensuring Hardware user data: %w", err)
 	}
 
-	return hw, scope.setStatus(hw)
+	return hw, nil
 }
 
 func (scope *machineReconcileScope) hardwareForMachine() (*tinkv1.Hardware, error) {
@@ -345,10 +345,7 @@ func byHardwareAffinity(hardware []tinkv1.Hardware, preferred []infrastructurev1
 }
 
 func (scope *machineReconcileScope) releaseHardware(hw *tinkv1.Hardware) error {
-	patchHelper, err := patch.NewHelper(hw, scope.tinkerbellClient)
-	if err != nil {
-		return fmt.Errorf("initializing patch helper for selected hardware: %w", err)
-	}
+	base := hw.DeepCopy()
 
 	delete(hw.Labels, HardwareOwnerNameLabel)
 	delete(hw.Labels, HardwareOwnerNamespaceLabel)
@@ -360,10 +357,24 @@ func (scope *machineReconcileScope) releaseHardware(hw *tinkv1.Hardware) error {
 	// hardware next.
 	hw.Spec.UserData = nil
 
+	// The same holds for the DHCP reservation written from IPAM: the claim is released right
+	// after this, so the address must not stay reserved for this MAC.
+	if scope.tinkerbellMachine.Spec.AddressFromPool != nil {
+		mac, err := scope.ipamInterfaceMAC(hw)
+		if err != nil {
+			return fmt.Errorf("resolving IPAM interface to clear: %w", err)
+		}
+
+		clearHardwareAddress(hw, mac)
+	}
+
 	controllerutil.RemoveFinalizer(hw, infrastructurev1.MachineFinalizer)
 	controllerutil.RemoveFinalizer(hw, infrastructurev1.MachineLegacyFinalizer)
 
-	if err := patchHelper.Patch(scope.ctx, hw); err != nil {
+	// The interfaces list is atomic, so this patch carries all of it; the optimistic lock
+	// keeps a concurrent interfaces write from being reverted to this copy.
+	releasePatch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	if err := scope.tinkerbellClient.Patch(scope.ctx, hw, releasePatch); err != nil {
 		return fmt.Errorf("patching Hardware object: %w", err)
 	}
 

@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/gomega" //nolint:revive // one day we will remove gomega
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
 
 	"github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	"github.com/tinkerbell/cluster-api-provider-tinkerbell/webhooks"
@@ -138,4 +139,51 @@ func Test_invalid_tinkerbell_machine(t *testing.T) {
 		_, err = w.ValidateUpdate(context.Background(), existingValidMachine, &machine)
 		g.Expect(err).To(HaveOccurred())
 	}
+}
+
+func Test_tinkerbell_machine_address_from_pool_is_immutable_once_hardware_is_selected(t *testing.T) {
+	t.Parallel()
+
+	pool := func(name string) *v1beta2.TinkerbellMachine {
+		return &v1beta2.TinkerbellMachine{Spec: v1beta2.TinkerbellMachineSpec{
+			TinkerbellMachineConfig: v1beta2.TinkerbellMachineConfig{
+				AddressFromPool: &ipamv1.IPPoolReference{APIGroup: "ipam.cluster.x-k8s.io", Kind: "InClusterIPPool", Name: name},
+			},
+		}}
+	}
+
+	t.Run("allowed_before_hardware_selection", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		_, err := (&webhooks.TinkerbellMachine{}).ValidateUpdate(context.Background(), pool("a"), pool("b"))
+		g.Expect(err).NotTo(HaveOccurred())
+	})
+
+	t.Run("rejected_after_hardware_selection", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		old := pool("a")
+		old.Spec.HardwareName = "hw"
+		updated := pool("b")
+		updated.Spec.HardwareName = "hw"
+
+		_, err := (&webhooks.TinkerbellMachine{}).ValidateUpdate(context.Background(), old, updated)
+		g.Expect(err).To(HaveOccurred())
+		g.Expect(err.Error()).To(ContainSubstring("spec.addressFromPool"))
+	})
+
+	t.Run("unchanged_pool_is_fine_after_hardware_selection", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		old := pool("a")
+		old.Spec.HardwareName = "hw"
+		updated := pool("a")
+		updated.Spec.HardwareName = "hw"
+
+		_, err := (&webhooks.TinkerbellMachine{}).ValidateUpdate(context.Background(), old, updated)
+		g.Expect(err).NotTo(HaveOccurred())
+	})
 }

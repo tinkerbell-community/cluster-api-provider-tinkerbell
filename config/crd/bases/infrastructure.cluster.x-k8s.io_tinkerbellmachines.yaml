@@ -633,6 +633,43 @@ spec:
               controller-managed fields that are set at runtime during hardware selection.
               The embedded fields flatten into the JSON spec, so the CRD schema is unchanged.
             properties:
+              addressFromPool:
+                description: |-
+                  AddressFromPool names a Cluster API IPAM pool an address is claimed from for the
+                  machine's primary network interface (spec.interfaces[0] on the selected Hardware).
+                  The allocated address, netmask and gateway are written to that interface's DHCP
+                  reservation, so Tinkerbell hands the machine that address, and it is reported as the
+                  machine's address. Immutable once Hardware is selected.
+                properties:
+                  apiGroup:
+                    description: |-
+                      apiGroup of the IPPool.
+                      apiGroup must be fully qualified domain name.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                  kind:
+                    description: |-
+                      kind of the IPPool.
+                      kind must consist of alphanumeric characters or '-', start with an alphabetic character, and end with an alphanumeric character.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?$
+                    type: string
+                  name:
+                    description: |-
+                      name of the IPPool.
+                      name must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                required:
+                - apiGroup
+                - kind
+                - name
+                type: object
               bootOptions:
                 description: BootOptions are options that control the booting of Hardware.
                 properties:

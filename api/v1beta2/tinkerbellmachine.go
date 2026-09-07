@@ -20,6 +20,7 @@ import (
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
 )
 
 const (
@@ -30,6 +31,11 @@ const (
 	// MachineLegacyFinalizer is the old finalizer name without a path separator.
 	// Kept for backward-compatible removal during upgrades.
 	MachineLegacyFinalizer = "tinkerbellmachine.infrastructure.cluster.x-k8s.io"
+
+	// IPAddressClaimFinalizer is placed on the IPAddressClaim CAPT creates for a machine. A
+	// claim deleted out from under a running machine then lingers and is reported, instead of
+	// being silently replaced by a fresh allocation that could change the node's address.
+	IPAddressClaimFinalizer = "infrastructure.cluster.x-k8s.io/ipaddressclaim"
 )
 
 // TinkerbellMachineConfig contains user-configurable fields that define how a machine
@@ -60,6 +66,14 @@ type TinkerbellMachineConfig struct {
 	// BootOptions are options that control the booting of Hardware.
 	// +optional
 	BootOptions BootOptions `json:"bootOptions,omitempty"`
+
+	// AddressFromPool names a Cluster API IPAM pool an address is claimed from for the
+	// machine's primary network interface (spec.interfaces[0] on the selected Hardware).
+	// The allocated address, netmask and gateway are written to that interface's DHCP
+	// reservation, so Tinkerbell hands the machine that address, and it is reported as the
+	// machine's address. Immutable once Hardware is selected.
+	// +optional
+	AddressFromPool *ipamv1.IPPoolReference `json:"addressFromPool,omitempty"`
 }
 
 // TinkerbellMachineSpec defines the desired state of TinkerbellMachine.

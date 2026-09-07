@@ -31,6 +31,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -46,6 +48,8 @@ func hardwareTestScheme(g Gomega) *runtime.Scheme {
 	sb := &scheme.Builder{GroupVersion: tinkv1.GroupVersion}
 	sb.Register(&tinkv1.Hardware{}, &tinkv1.HardwareList{})
 	g.Expect(sb.AddToScheme(s)).To(Succeed())
+	g.Expect(ipamv1.AddToScheme(s)).To(Succeed())
+	g.Expect(clusterv1.AddToScheme(s)).To(Succeed())
 
 	return s
 }
@@ -56,7 +60,7 @@ func newHardwareTestClient(g Gomega, objects ...client.Object) client.Client {
 	return fake.NewClientBuilder().
 		WithScheme(s).
 		WithObjects(objects...).
-		WithStatusSubresource(&tinkv1.Hardware{}).
+		WithStatusSubresource(&tinkv1.Hardware{}, &infrastructurev1.TinkerbellMachine{}).
 		Build()
 }
 

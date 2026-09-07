@@ -32,6 +32,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
+	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -160,7 +162,8 @@ func validMachine(name, namespace, clusterName string) *clusterv1.Machine {
 			},
 		},
 		Spec: clusterv1.MachineSpec{
-			Version: "1.19.4",
+			ClusterName: clusterName,
+			Version:     "1.19.4",
 			Bootstrap: clusterv1.Bootstrap{
 				DataSecretName: ptr.To[string](name),
 			},
@@ -289,6 +292,7 @@ func kubernetesClientWithObjects(t *testing.T, objects []runtime.Object) client.
 	objs := []client.Object{
 		&infrastructurev1.TinkerbellMachine{},
 		&infrastructurev1.TinkerbellCluster{},
+		&ipamv1.IPAddressClaim{},
 	}
 
 	return fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).WithStatusSubresource(objs...).Build()
@@ -325,6 +329,7 @@ func testScheme(g Gomega) *runtime.Scheme {
 	g.Expect(controller.AddToSchemeTinkerbell(scheme)).To(Succeed(), "Adding Tinkerbell objects to scheme should succeed")
 	g.Expect(infrastructurev1.AddToScheme(scheme)).To(Succeed(), "Adding Tinkerbell CAPI objects to scheme should succeed")
 	g.Expect(clusterv1.AddToScheme(scheme)).To(Succeed(), "Adding CAPI objects to scheme should succeed")
+	g.Expect(ipamv1.AddToScheme(scheme)).To(Succeed(), "Adding CAPI IPAM objects to scheme should succeed")
 	g.Expect(corev1.AddToScheme(scheme)).To(Succeed(), "Adding Core V1 objects to scheme should succeed")
 
 	return scheme
@@ -912,6 +917,7 @@ func reconcileMachineWithClients(
 	_ = controller.AddToSchemeTinkerbell(scheme)
 	_ = infrastructurev1.AddToScheme(scheme)
 	_ = clusterv1.AddToScheme(scheme)
+	_ = ipamv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
 
 	machineController := &machine.TinkerbellMachineReconciler{
@@ -2114,4 +2120,180 @@ func findCondition(conditions []metav1.Condition, conditionType string) *metav1.
 	}
 
 	return nil
+}
+
+func Test_Machine_reconciliation_with_ipam_pool(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	const (
+		mac      = "aa:bb:cc:dd:ee:ff"
+		poolName = "lab-pool"
+		address  = "10.1.40.32"
+	)
+
+	hardwareUUID := uuid.New().String()
+
+	tinkerbellMachine := validTinkerbellMachine(tinkerbellMachineName, clusterNamespace, machineName, hardwareUUID)
+	tinkerbellMachine.Spec.AddressFromPool = &ipamv1.IPPoolReference{APIGroup: "ipam.cluster.x-k8s.io", Kind: "InClusterIPPool", Name: poolName}
+
+	// The Hardware knows its MAC but has no address: IPAM must supply it.
+	hardware := validHardware(hardwareName, hardwareUUID, "")
+	hardware.Spec.Interfaces[0].DHCP = &tinkv1.DHCP{MAC: mac}
+
+	objects := []runtime.Object{
+		tinkerbellMachine,
+		validCluster(clusterName, clusterNamespace),
+		validTinkerbellCluster(clusterName, clusterNamespace),
+		hardware,
+		validMachine(machineName, clusterNamespace, clusterName),
+		validSecret(machineName, clusterNamespace),
+	}
+
+	client := kubernetesClientWithObjects(t, objects)
+	ctx := context.Background()
+
+	result, err := reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
+	g.Expect(err).NotTo(HaveOccurred(), "waiting for an address is not an error")
+	g.Expect(result.RequeueAfter).To(Equal(machine.IPAddressRequeueAfter))
+
+	claimKey := types.NamespacedName{Name: hardwareName + "-" + poolName, Namespace: clusterNamespace}
+	claim := &ipamv1.IPAddressClaim{}
+	g.Expect(client.Get(ctx, claimKey, claim)).To(Succeed(), "first pass creates the claim")
+	g.Expect(claim.Spec.ClusterName).To(Equal(clusterName))
+	g.Expect(claim.Annotations).To(HaveKeyWithValue(machine.AnnotationMACAddress, mac))
+
+	waiting := &infrastructurev1.TinkerbellMachine{}
+	g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, waiting)).To(Succeed())
+	g.Expect(waiting.Spec.HardwareName).To(Equal(hardwareName), "hardware selection is persisted while waiting")
+	g.Expect(conditions.GetReason(waiting, infrastructurev1.IPAddressClaimedCondition)).To(Equal(infrastructurev1.WaitingForIPAddressReason))
+	g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, &tinkv1.Workflow{})).NotTo(Succeed(),
+		"no Workflow before the address is known")
+
+	// Play the IPAM provider.
+	ipAddress := &ipamv1.IPAddress{
+		ObjectMeta: metav1.ObjectMeta{Name: claim.Name, Namespace: clusterNamespace},
+		Spec: ipamv1.IPAddressSpec{
+			ClaimRef: ipamv1.IPAddressClaimReference{Name: claim.Name},
+			PoolRef:  claim.Spec.PoolRef,
+			Address:  address,
+			Prefix:   ptr.To[int32](24),
+			Gateway:  "10.1.40.1",
+		},
+	}
+	g.Expect(client.Create(ctx, ipAddress)).To(Succeed())
+	claim.Status.AddressRef.Name = ipAddress.Name
+	g.Expect(client.Status().Update(ctx, claim)).To(Succeed())
+
+	_, err = reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	t.Run("reserves_the_address_on_the_hardware", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		updatedHardware := &tinkv1.Hardware{}
+		g.Expect(client.Get(ctx, types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace}, updatedHardware)).To(Succeed())
+		g.Expect(updatedHardware.Spec.Interfaces[0].DHCP.IP).To(Equal(&tinkv1.IP{Address: address, Netmask: "255.255.255.0", Gateway: "10.1.40.1", Family: 4}))
+	})
+
+	t.Run("reports_the_address_and_condition", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		updatedMachine := &infrastructurev1.TinkerbellMachine{}
+		g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, updatedMachine)).To(Succeed())
+		g.Expect(updatedMachine.Status.Addresses).To(HaveLen(1))
+		g.Expect(updatedMachine.Status.Addresses[0].Address).To(Equal(address))
+		g.Expect(conditions.IsTrue(updatedMachine, infrastructurev1.IPAddressClaimedCondition)).To(BeTrue())
+	})
+
+	t.Run("continues_to_provisioning", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, &tinkv1.Workflow{})).To(Succeed())
+	})
+}
+
+func Test_Machine_reconciliation_releases_the_ipam_claim_on_removal(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	const (
+		mac      = "aa:bb:cc:dd:ee:ff"
+		poolName = "lab-pool"
+	)
+
+	hardwareUUID := uuid.New().String()
+
+	tinkerbellMachine := validTinkerbellMachine(tinkerbellMachineName, clusterNamespace, machineName, hardwareUUID)
+	tinkerbellMachine.Spec.AddressFromPool = &ipamv1.IPPoolReference{APIGroup: "ipam.cluster.x-k8s.io", Kind: "InClusterIPPool", Name: poolName}
+
+	hardware := validHardware(hardwareName, hardwareUUID, "")
+	hardware.Spec.Interfaces[0].DHCP = &tinkv1.DHCP{MAC: mac}
+
+	objects := []runtime.Object{
+		tinkerbellMachine,
+		validCluster(clusterName, clusterNamespace),
+		validTinkerbellCluster(clusterName, clusterNamespace),
+		hardware,
+		validMachine(machineName, clusterNamespace, clusterName),
+		validSecret(machineName, clusterNamespace),
+	}
+
+	client := kubernetesClientWithObjects(t, objects)
+	ctx := context.Background()
+
+	_, err := reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	claimKey := types.NamespacedName{Name: hardwareName + "-" + poolName, Namespace: clusterNamespace}
+	claim := &ipamv1.IPAddressClaim{}
+	g.Expect(client.Get(ctx, claimKey, claim)).To(Succeed())
+
+	ipAddress := &ipamv1.IPAddress{
+		ObjectMeta: metav1.ObjectMeta{Name: claim.Name, Namespace: clusterNamespace},
+		Spec: ipamv1.IPAddressSpec{
+			ClaimRef: ipamv1.IPAddressClaimReference{Name: claim.Name},
+			PoolRef:  claim.Spec.PoolRef,
+			Address:  "10.1.40.32",
+			Prefix:   ptr.To[int32](24),
+		},
+	}
+	g.Expect(client.Create(ctx, ipAddress)).To(Succeed())
+	claim.Status.AddressRef.Name = ipAddress.Name
+	g.Expect(client.Status().Update(ctx, claim)).To(Succeed())
+
+	_, err = reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	reserved := &tinkv1.Hardware{}
+	g.Expect(client.Get(ctx, types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace}, reserved)).To(Succeed())
+	g.Expect(reserved.Spec.Interfaces[0].DHCP.IP).NotTo(BeNil(), "precondition: the address was reserved")
+
+	updatedMachine := &infrastructurev1.TinkerbellMachine{}
+	g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, updatedMachine)).To(Succeed())
+	g.Expect(client.Delete(ctx, updatedMachine)).To(Succeed())
+
+	_, err = reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
+	g.Expect(err).NotTo(HaveOccurred())
+
+	t.Run("deletes_the_claim", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		err := client.Get(ctx, claimKey, &ipamv1.IPAddressClaim{})
+		g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "claim carries no other finalizer here, so it must be gone")
+	})
+
+	t.Run("clears_the_reservation", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		released := &tinkv1.Hardware{}
+		g.Expect(client.Get(ctx, types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace}, released)).To(Succeed())
+		g.Expect(released.Spec.Interfaces[0].DHCP.IP).To(BeNil())
+		g.Expect(released.Spec.Interfaces[0].DHCP.MAC).To(Equal(mac), "only the reservation is cleared, not the interface")
+	})
 }
