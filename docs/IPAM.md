@@ -55,8 +55,21 @@ status:
 
 The primary interface, `spec.interfaces[0]`, the same one CAPT already reports the node
 address from. Its `dhcp.mac` must be set; that MAC is recorded on the claim as
-`capt.tinkerbell.org/mac-address` and is the key the address is written back under. A
-provider that can reserve by MAC may use the annotation.
+`capt.tinkerbell.org/mac-address` and is the key the address is written back under.
+
+## What the claim tells the provider
+
+CAPT also annotates the claim in provider-neutral terms, so an IPAM provider that can act
+on them does not have to know CAPT:
+
+| Annotation | Value |
+| --- | --- |
+| `ipam.cluster.x-k8s.io/mac-address` | the interface's MAC, for a provider that can reserve by MAC |
+| `ipam.cluster.x-k8s.io/hostname` | the Hardware name, which is what Tinkerbell already hands the node as its hostname |
+
+The hostname is the Hardware's, not the Machine's: Machines are renamed by every rollout
+while the box keeps its name, and CAPI links the two by `providerID`, never by name.
+Claims made by an earlier CAPT get both annotations on their next reconcile.
 
 One address per machine. A Tinkerbell interface holds one `dhcp.ip`, so dual-stack is not
 expressible on the Hardware side today.

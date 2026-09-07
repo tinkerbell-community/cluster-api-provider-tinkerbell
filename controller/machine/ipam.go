@@ -30,6 +30,14 @@ const (
 	// providers that can reserve by MAC.
 	AnnotationMACAddress = "capt.tinkerbell.org/mac-address"
 
+	// AnnotationIPAMMACAddress tells the IPAM provider, in provider-neutral terms, the MAC
+	// to reserve the address for. It duplicates AnnotationMACAddress under a key no
+	// provider has to know CAPT to read.
+	AnnotationIPAMMACAddress = "ipam.cluster.x-k8s.io/mac-address"
+	// AnnotationIPAMHostname tells the IPAM provider the name the node goes by: its
+	// Hardware name, which Tinkerbell already hands it as hostname.
+	AnnotationIPAMHostname = "ipam.cluster.x-k8s.io/hostname"
+
 	ipv4Bits   = 32
 	ipv4Family = 4
 	ipv6Family = 6
@@ -229,7 +237,46 @@ func (scope *machineReconcileScope) ensureIPAddressClaim(hw *tinkv1.Hardware, ma
 		return nil, fmt.Errorf("%w: %s", ErrIPAddressClaimConflict, msg)
 	}
 
+	if err := scope.ensureIPAMAnnotations(claim, hw, mac); err != nil {
+		return nil, err
+	}
+
 	return claim, nil
+}
+
+// ensureIPAMAnnotations adds the provider-neutral annotations to a claim made before they
+// existed, so an IPAM provider upgrade reaches the node without a new claim.
+func (scope *machineReconcileScope) ensureIPAMAnnotations(claim *ipamv1.IPAddressClaim, hw *tinkv1.Hardware, mac string) error {
+	want := map[string]string{
+		AnnotationIPAMMACAddress: mac,
+		AnnotationIPAMHostname:   hw.Name,
+	}
+
+	base := claim.DeepCopy()
+	changed := false
+
+	for key, value := range want {
+		if claim.Annotations[key] == value {
+			continue
+		}
+
+		if claim.Annotations == nil {
+			claim.Annotations = map[string]string{}
+		}
+
+		claim.Annotations[key] = value
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+
+	if err := scope.client.Patch(scope.ctx, claim, client.MergeFrom(base)); err != nil {
+		return fmt.Errorf("annotating IPAddressClaim %s: %w", claim.Name, err)
+	}
+
+	return nil
 }
 
 func (scope *machineReconcileScope) newIPAddressClaim(hw *tinkv1.Hardware, mac string, pool *ipamv1.IPPoolReference) *ipamv1.IPAddressClaim {
@@ -249,6 +296,8 @@ func (scope *machineReconcileScope) newIPAddressClaim(hw *tinkv1.Hardware, mac s
 				AnnotationHardwareName:      hw.Name,
 				AnnotationHardwareNamespace: hw.Namespace,
 				AnnotationMACAddress:        mac,
+				AnnotationIPAMMACAddress:    mac,
+				AnnotationIPAMHostname:      hw.Name,
 			},
 			Finalizers: []string{infrastructurev1.IPAddressClaimFinalizer},
 		},

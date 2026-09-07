@@ -135,6 +135,10 @@ func Test_reconcileIPAM_creates_claim_and_waits(t *testing.T) {
 	g.Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationHardwareName, ipamHardware))
 	g.Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationHardwareNamespace, ipamNamespace))
 	g.Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationMACAddress, ipamMAC))
+	g.Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationIPAMMACAddress, ipamMAC),
+		"the provider-neutral MAC annotation is what an IPAM provider reads")
+	g.Expect(claim.Annotations).To(HaveKeyWithValue(AnnotationIPAMHostname, ipamHardware),
+		"the hostname is the Hardware name, which is what the node calls itself")
 	g.Expect(metav1.IsControlledBy(claim, machine)).To(BeTrue(), "claim must be controller-owned by the TinkerbellMachine")
 	g.Expect(controllerutil.ContainsFinalizer(claim, infrastructurev1.IPAddressClaimFinalizer)).To(BeTrue())
 
@@ -142,6 +146,26 @@ func Test_reconcileIPAM_creates_claim_and_waits(t *testing.T) {
 	g.Expect(cond).NotTo(BeNil())
 	g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 	g.Expect(cond.Reason).To(Equal(infrastructurev1.WaitingForIPAddressReason))
+}
+
+// A claim made before the neutral annotations existed gets them on the next reconcile,
+// so a provider upgrade reaches nodes without recreating their claims.
+func Test_reconcileIPAM_backfills_the_neutral_annotations_on_an_owned_claim(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	machine := ipamMachine()
+	hw := ipamHardwareObject(ipamMAC)
+	claim := ownedClaim(machine, hw, ipamMAC)
+	scope, cl := ipamScope(g, machine, hw, claim)
+
+	g.Expect(scope.reconcileIPAM(hw)).To(MatchError(errWaitingForIPAddress))
+
+	got := &ipamv1.IPAddressClaim{}
+	g.Expect(cl.Get(context.Background(), client.ObjectKeyFromObject(claim), got)).To(Succeed())
+	g.Expect(got.Annotations).To(HaveKeyWithValue(AnnotationIPAMMACAddress, ipamMAC))
+	g.Expect(got.Annotations).To(HaveKeyWithValue(AnnotationIPAMHostname, ipamHardware))
+	g.Expect(got.Annotations).To(HaveKeyWithValue(AnnotationMACAddress, ipamMAC), "CAPT's own keys are kept")
 }
 
 func Test_reconcileIPAM_is_a_no_op_without_a_pool(t *testing.T) {
