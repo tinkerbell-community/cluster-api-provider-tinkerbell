@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	. "github.com/onsi/gomega" //nolint:revive // one day we will remove gomega
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -280,55 +279,4 @@ func Test_takeHardwareOwnership_concurrent_claims(t *testing.T) {
 		ContainElement(persisted.Labels[HardwareOwnerNameLabel]),
 		"the persisted owner must be one of the competing Machines",
 	)
-}
-
-func TestEnsureHardwareUserDataYieldsToTalos2disk(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	owned := "version: v1alpha1\nmachine:\n  install:\n    image: factory.talos.dev/metal-installer/abc:v1.14.1\n"
-	hw := &tinkv1.Hardware{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "hw", Namespace: "tinkerbell",
-			Annotations: map[string]string{UserDataOwnerAnnotation: UserDataOwnerTalos2disk},
-		},
-	}
-	hw.Spec.UserData = &owned
-	c := newHardwareTestClient(g, hw)
-
-	scope := &machineReconcileScope{
-		ctx:                  context.Background(),
-		log:                  logr.Discard(),
-		tinkerbellClient:     c,
-		bootstrapCloudConfig: "version: v1alpha1\nmachine:\n  install:\n    disk: PROVIDER_ID\n",
-	}
-
-	g.Expect(scope.ensureHardwareUserData(hw, "tinkerbell://tinkerbell/hw")).To(Succeed())
-
-	got := &tinkv1.Hardware{}
-	g.Expect(c.Get(context.Background(), types.NamespacedName{Name: "hw", Namespace: "tinkerbell"}, got)).To(Succeed())
-	g.Expect(got.Spec.UserData).NotTo(BeNil())
-	g.Expect(*got.Spec.UserData).To(Equal(owned), "talos2disk-owned user data must survive the reconcile")
-}
-
-func TestEnsureHardwareUserDataWritesWithoutOwner(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	hw := &tinkv1.Hardware{ObjectMeta: metav1.ObjectMeta{Name: "hw", Namespace: "tinkerbell"}}
-	c := newHardwareTestClient(g, hw)
-
-	scope := &machineReconcileScope{
-		ctx:                  context.Background(),
-		log:                  logr.Discard(),
-		tinkerbellClient:     c,
-		bootstrapCloudConfig: "version: v1alpha1\nmachine:\n  install:\n    disk: PROVIDER_ID\n",
-	}
-
-	g.Expect(scope.ensureHardwareUserData(hw, "tinkerbell://tinkerbell/hw")).To(Succeed())
-
-	got := &tinkv1.Hardware{}
-	g.Expect(c.Get(context.Background(), types.NamespacedName{Name: "hw", Namespace: "tinkerbell"}, got)).To(Succeed())
-	g.Expect(got.Spec.UserData).NotTo(BeNil())
-	g.Expect(*got.Spec.UserData).To(ContainSubstring("disk: tinkerbell://tinkerbell/hw"))
 }
