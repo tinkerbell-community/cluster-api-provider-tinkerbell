@@ -24,7 +24,7 @@ const (
 	// DefaultInPlaceRecoveryTimeout is how long a machine may be mid in-place update before
 	// its failure to return is treated as a hung boot.
 	//
-	// Generous on purpose: a Talos upgrade cordons and drains the node, reboots, and rejoins,
+	// Generous on purpose: an OS upgrade cordons and drains the node, reboots, and rejoins,
 	// which on real hardware can take several minutes. Power cycling a node that was merely
 	// slow is worse than waiting.
 	DefaultInPlaceRecoveryTimeout = 20 * time.Minute
@@ -34,7 +34,7 @@ const (
 //
 // Once Cluster API has stamped the in-place update annotation it is committed to that path:
 // there is no fallback to replacing the Machine. If the node fails to come back from the
-// reboot that a Talos upgrade performs, the update would otherwise hang indefinitely with no
+// reboot that an OS upgrade performs, the update would otherwise hang indefinitely with no
 // automated remedy.
 //
 // Tinkerbell is one of the few infrastructure providers that can actually do something here,

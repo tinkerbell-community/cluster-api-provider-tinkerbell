@@ -38,7 +38,6 @@ import (
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	tinkcluster "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/cluster"
-	"github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/schematic"
 )
 
 const (
@@ -92,10 +91,7 @@ type machineReconcileScope struct {
 	// by MAC rather than position. Nil when no pool is configured.
 	reservedAddress *tinkv1.IP
 
-	// schematicRegistrar resolves Talos Image Factory schematics. Nil disables resolution.
-	schematicRegistrar *schematic.Registrar
-	factoryURL         string
-	watchManager       *tinkcluster.NamespaceWatchManager
+	watchManager *tinkcluster.NamespaceWatchManager
 }
 
 func (scope *machineReconcileScope) addFinalizer() error {
@@ -218,20 +214,13 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 
 		// A provisioned machine is never re-imaged on a spec change, which is what makes
 		// Cluster API in-place updates viable here. The one thing that can still go wrong is
-		// the node failing to return from the reboot an in-place Talos upgrade performs, so
+		// the node failing to return from the reboot an in-place OS upgrade performs, so
 		// offer it a BMC power cycle if it has been stalled too long.
 		if err := scope.reconcileInPlaceRecovery(hw, DefaultInPlaceRecoveryTimeout); err != nil {
 			return fmt.Errorf("reconciling in-place update recovery: %w", err)
 		}
 
 		return nil
-	}
-
-	// Resolve the Image Factory schematic before the Workflow is created so the template can
-	// reference the resulting disk image, and so the installer image is on status for the
-	// bootstrap provider to pick up.
-	if err := scope.reconcileSchematic(hw); err != nil {
-		return fmt.Errorf("reconciling Image Factory schematic: %w", err)
 	}
 
 	wf, err := scope.ensureTemplateAndWorkflow(hw)
