@@ -33,6 +33,13 @@ const (
 	// HardwareProvisionedAnnotation signifies that the Hardware with this annotation has be provisioned by CAPT.
 	HardwareProvisionedAnnotation = "v1alpha1.tinkerbell.org/provisioned"
 
+	// UserDataOwnerAnnotation marks Hardware whose spec.userData was written by an install
+	// action (talos2disk) with the real installer image and machine overrides. CAPT leaves
+	// such user data alone instead of re-asserting the bootstrap secret's rendering.
+	UserDataOwnerAnnotation = "talos.tinkerbell.org/userdata-owner"
+	// UserDataOwnerTalos2disk is the UserDataOwnerAnnotation value talos2disk writes.
+	UserDataOwnerTalos2disk = "talos2disk"
+
 	// HardwareTemplateOverrideAnnotation can be used to override the default Template used for provisioning.
 	HardwareTemplateOverrideAnnotation = "hardware.tinkerbell.org/capt-template-override"
 )
@@ -167,6 +174,12 @@ func (scope *machineReconcileScope) takeHardwareOwnership(hw *tinkv1.Hardware) e
 }
 
 func (scope *machineReconcileScope) ensureHardwareUserData(hw *tinkv1.Hardware, providerID string) error {
+	if hw.GetAnnotations()[UserDataOwnerAnnotation] == UserDataOwnerTalos2disk {
+		scope.log.V(1).Info("Hardware user data is owned by talos2disk; leaving it unchanged", "Hardware name", hw.Name)
+
+		return nil
+	}
+
 	userData := strings.ReplaceAll(scope.bootstrapCloudConfig, providerIDPlaceholder, providerID)
 
 	if hw.Spec.UserData == nil || *hw.Spec.UserData != userData {
