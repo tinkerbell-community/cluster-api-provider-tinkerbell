@@ -205,7 +205,7 @@ func validHardware(name, uuid, ip string, options ...testOptions) *tinkv1.Hardwa
 						},
 					},
 					Netboot: &tinkv1.Netboot{
-						AllowPXE: ptr.To(true),
+						AllowPXE: new(true),
 					},
 				},
 			},
@@ -498,7 +498,7 @@ func Test_Machine_reconciliation_with_available_hardware(t *testing.T) {
 		updatedHardware := &tinkv1.Hardware{}
 		g.Expect(client.Get(ctx, hardwareNamespacedName, updatedHardware)).To(Succeed())
 
-		if diff := cmp.Diff(updatedHardware.Spec.Interfaces[0].Netboot.AllowPXE, ptr.To(true)); diff != "" {
+		if diff := cmp.Diff(updatedHardware.Spec.Interfaces[0].Netboot.AllowPXE, new(true)); diff != "" {
 			t.Error(diff)
 		}
 	})
@@ -2053,7 +2053,7 @@ func Test_Machine_reconciliation_pausing(t *testing.T) {
 		hardwareUUID := uuid.New().String()
 
 		pausedCluster := validCluster(clusterName, clusterNamespace)
-		pausedCluster.Spec.Paused = ptr.To(true)
+		pausedCluster.Spec.Paused = new(true)
 
 		objects := []runtime.Object{
 			validTinkerbellMachine(tinkerbellMachineName, clusterNamespace, machineName, hardwareUUID),

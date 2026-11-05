@@ -26,7 +26,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -132,7 +131,7 @@ func validHardware(name, uuid, ip string, options ...testOptions) *tinkv1.Hardwa
 						},
 					},
 					Netboot: &tinkv1.Netboot{
-						AllowPXE: ptr.To(true),
+						AllowPXE: new(true),
 					},
 				},
 			},
@@ -335,7 +334,7 @@ func validTinkerbellCluster(name, namespace string) *infrastructurev1.Tinkerbell
 		Status: infrastructurev1.TinkerbellClusterStatus{
 			Ready: true,
 			Initialization: &infrastructurev1.TinkerbellClusterInitializationStatus{
-				Provisioned: ptr.To(true),
+				Provisioned: new(true),
 			},
 		},
 	}
@@ -395,7 +394,7 @@ func clusterReconciliationIsNotRequeuedWhenClusterIsPaused(t *testing.T) {
 	g := NewWithT(t)
 
 	pausedCluster := validCluster(clusterName, clusterNamespace)
-	pausedCluster.Spec.Paused = ptr.To(true)
+	pausedCluster.Spec.Paused = new(true)
 
 	objects := []runtime.Object{
 		pausedCluster,

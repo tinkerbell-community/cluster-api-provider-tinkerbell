@@ -27,7 +27,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -209,7 +208,7 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 		scope.log.Info("Marking TinkerbellMachine as Ready")
 		scope.tinkerbellMachine.Status.Ready = true
 		scope.tinkerbellMachine.Status.Initialization = &infrastructurev1.TinkerbellMachineInitializationStatus{
-			Provisioned: ptr.To(true),
+			Provisioned: new(true),
 		}
 
 		// A provisioned machine is never re-imaged on a spec change, which is what makes
@@ -244,7 +243,7 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 		scope.log.Info("Marking TinkerbellMachine as Ready")
 		scope.tinkerbellMachine.Status.Ready = true
 		scope.tinkerbellMachine.Status.Initialization = &infrastructurev1.TinkerbellMachineInitializationStatus{
-			Provisioned: ptr.To(true),
+			Provisioned: new(true),
 		}
 
 		if err := scope.patchHardwareAnnotations(hw, map[string]string{HardwareProvisionedAnnotation: "true"}); err != nil {

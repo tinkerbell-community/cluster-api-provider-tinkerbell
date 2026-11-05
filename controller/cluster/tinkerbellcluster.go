@@ -25,7 +25,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -226,7 +225,7 @@ func (crc *clusterReconcileContext) reconcile() error {
 	// v1beta2. Both are set to maintain backward compatibility during upgrades.
 	crc.tinkerbellCluster.Status.Ready = true
 	crc.tinkerbellCluster.Status.Initialization = &infrastructurev1.TinkerbellClusterInitializationStatus{
-		Provisioned: ptr.To(true),
+		Provisioned: new(true),
 	}
 
 	crc.log.Info("Setting cluster status to ready")

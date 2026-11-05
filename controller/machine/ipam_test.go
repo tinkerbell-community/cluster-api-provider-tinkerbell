@@ -104,7 +104,7 @@ func ownedClaim(machine *infrastructurev1.TinkerbellMachine, hw *tinkv1.Hardware
 				Kind:       "TinkerbellMachine",
 				Name:       machine.Name,
 				UID:        machine.UID,
-				Controller: ptr.To(true),
+				Controller: new(true),
 			}},
 			Finalizers: []string{infrastructurev1.IPAddressClaimFinalizer},
 		},
