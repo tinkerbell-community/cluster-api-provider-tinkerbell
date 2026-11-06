@@ -54,7 +54,7 @@ The `Paused` condition will update to `status: "False"` with `reason: NotPaused`
 
 ## What Pausing Blocks
 
-- Creation and deletion of Tinkerbell Templates, Workflows, and BMC Jobs
+- Creation and deletion of Tinkerbell Workflows, Tasks, Templates, and BMC Jobs
 - Hardware selection and provisioning
 - Provider reconciliation and status progression on `TinkerbellCluster` and `TinkerbellMachine`
 - Deletion reconciliation (finalizer removal is deferred until unpaused)

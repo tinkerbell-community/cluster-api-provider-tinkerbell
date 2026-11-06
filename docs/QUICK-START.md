@@ -22,7 +22,9 @@ The rest of this guide covers manual setup on real (or pre-existing virtual) inf
 - [kubectl] >= v1.33
 - [clusterctl] >= v1.12
 - [Helm] >= v3.13
-- A running [Tinkerbell stack] >= v0.23.
+- A running [Tinkerbell stack] from [tinkerbell-community] >= v0.27.0. CAPT reads and writes
+  Hardware, Workflows, Tasks and bmc Jobs as `v1alpha2`, which earlier Tinkerbell releases do
+  not serve (see [Compatibility](COMPATIBILITY.md#tinkerbell)).
 
 ### Initialize the management cluster
 
@@ -72,34 +74,42 @@ Cluster API Provider Tinkerbell does not assume all hardware configured in Tinke
 To make Tinkerbell Hardware available create a `Hardware` resource in the management cluster.
 Hardware objects should live in the same namespace as the Tinkerbell stack
 (specifically where `tink-controller` lives). CAPT will automatically create
-Template and Workflow resources in the Hardware's namespace, even if the CAPI
-objects are in a different namespace.
+the Workflow, and the Tasks or Template it runs, in the Hardware's namespace,
+even if the CAPI objects are in a different namespace.
+
+CAPT works with `tinkerbell.org/v1alpha2` Hardware. Hardware written as `v1alpha1` is still
+accepted: Tinkerbell converts and stores it as `v1alpha2`, and keeps what `v1alpha2` cannot
+represent in its `conversion.tinkerbell.org/v1alpha1` annotation, which CAPT never touches.
+The fields below are `v1alpha2` paths; the `v1alpha1` field each one converts from is in
+[Compatibility](COMPATIBILITY.md#hardware-fields-capt-uses).
 
 CAPT validates the following fields on each Hardware object during provisioning:
 
-- `spec.interfaces` — at least one interface must be defined
-- `spec.interfaces[0].dhcp` — the first interface must have DHCP configured
-- `spec.interfaces[0].dhcp.ip.address` — the DHCP configuration must include an IP address
-- `spec.disks` — at least one disk must be defined
+- `spec.networkInterfaces` — at least one interface must be defined
+- `spec.networkInterfaces[<mac>].ipam.ipv4.address` (or `ipam.ipv6.address`) — the primary
+  interface must have an IP address. The primary interface is the one `spec.agentID` names,
+  or the lowest MAC (for Hardware created as `v1alpha1`: its first interface, as before).
+- `spec.storageDevices` — at least one storage device must be defined
 
 CAPT also requires the following field (used but not explicitly validated at reconciliation time):
 
-- `spec.metadata.instance.id` — must be set. CAPT maps this value to the `device_1` workflow variable, which identifies the target device in every Workflow. It is also used to construct per-hardware ISO URL paths when using ISO boot modes.
+- `spec.instance.lookupID` (or, when it is empty, `spec.agentID`) — must be set. CAPT maps this value to the `device_1` workflow variable, which identifies the Agent that runs every task of the Workflow. It is also used to construct per-hardware ISO URL paths when using ISO boot modes.
 
-The `spec.metadata.instance.hostname` field is optional but recommended.
-The `spec.interfaces[0].netboot` block and `labels` field are also optional. Labels are used
+The `ipam.ipv4.hostname` field is optional but recommended.
+The interface's `netboot` block and `labels` field are also optional. Labels are used
 for [hardware affinity](#select-your-hardware) matching.
 
-**NOTE:** If the Hardware has a `spec.bmcRef`, CAPT uses it for boot mode
+**NOTE:** If the Hardware has a BMC — `spec.bmc.connection`, or for Hardware created as
+`v1alpha1`, a `spec.bmcRef` to a bmc `Machine` — CAPT uses it for boot mode
 operations (netboot, ISO, custom) and for powering off the machine during
-deletion. If `spec.bmcRef` is **not** set, the `bootOptions.bootMode` setting
-on the `TinkerbellMachineTemplate` is silently ignored and no power management
-is performed.
+deletion, with bmc Jobs that reference the Hardware. If the Hardware has **no** BMC,
+the `bootOptions.bootMode` setting on the `TinkerbellMachineTemplate` is silently
+ignored and no power management is performed.
 
 An example of a valid Hardware resource:
 
 ```yaml
-apiVersion: tinkerbell.org/v1alpha1
+apiVersion: tinkerbell.org/v1alpha2
 kind: Hardware
 metadata:
   name: node-1
@@ -107,31 +117,37 @@ metadata:
   labels:
     tinkerbell.org/role: worker
 spec:
-  disks:
-    - device: /dev/sda
-  interfaces:
-    - dhcp:
-        arch: x86_64
-        hostname: node-1
-        ip:
+  agentID: "aa:bb:cc:dd:ee:ff"
+  arch: x86_64
+  storageDevices:
+    - name: /dev/sda
+  instance:
+    lookupID: "aa:bb:cc:dd:ee:ff"
+  networkInterfaces:
+    "aa:bb:cc:dd:ee:ff":
+      dhcp:
+        ipv4:
+          leaseTimeSeconds: 86400
+      ipam:
+        ipv4:
           address: 192.168.1.10
+          prefix: "24"
           gateway: 192.168.1.1
-          netmask: 255.255.255.0
-        lease_time: 86400
-        mac: "aa:bb:cc:dd:ee:ff"
-        name_servers:
-          - 8.8.8.8
-        uefi: true
-      netboot:
-        allowPXE: true
-        allowWorkflow: true
-  metadata:
-    instance:
-      hostname: node-1
-      id: "aa:bb:cc:dd:ee:ff"
+          hostname: node-1
+          nameservers:
+            - 8.8.8.8
+      netboot: {}
+  # Optional: a BMC enables boot modes and power off on deletion.
+  # bmc:
+  #   bootMode: UEFI
+  #   connection:
+  #     host: 192.168.1.100
+  #     credentialsRef:
+  #       name: node-1-bmc
+  #       namespace: tink-system
 ```
 
-**NOTE:** The `metadata.name` and `spec.interfaces[0].dhcp.mac` must be unique across all Hardware objects.
+**NOTE:** The `metadata.name` and the interface MACs must be unique across all Hardware objects.
 
 ### Create your first workload cluster
 
@@ -253,22 +269,48 @@ provide one at the cluster or machine level.
 
 Set the `templateInline` field in the `TinkerbellMachineTemplate` spec with a full
 [Tinkerbell Template](https://docs.tinkerbell.org) definition, or use `templateRef` to reference
-an existing Tinkerbell Template object. The template supports Go template
-variables for hardware-specific values:
+an existing Tinkerbell Template object (`tinkerbell.org/v1alpha1`). The template is written
+in the `v1alpha1` Template format, as before, and supports Go template variables for
+hardware-specific values:
 
 | Variable | Description |
 |---|---|
-| `{{.device_1}}` | Worker device identifier (maps to `spec.metadata.instance.id` from the Hardware) |
-| `{{ index .Hardware.Disks 0 }}` | First disk device path (e.g. `/dev/sda`) |
+| `{{.device_1}}` | Worker device identifier (maps to `spec.instance.lookupID` from the Hardware, or `spec.agentID` when it has no lookupID) |
+| `{{ index .Hardware.Disks 0 }}` | First disk device path (e.g. `/dev/sda`), from `spec.storageDevices` |
 | `{{ formatPartition (index .Hardware.Disks 0) N }}` | Nth partition of the first disk |
 
 **IMPORTANT:** Every `task` block in the template **must** include `worker: "{{.device_1}}"`. This
 is how Tinkerbell determines which device should execute the task. The value is resolved at
-workflow creation time from the Hardware's `spec.metadata.instance.id` via the Workflow `HardwareMap`.
+workflow creation time from the Hardware's `spec.instance.lookupID` via the Workflow's
+`hardwareMap` (`v1alpha2`: `spec.globals.templateMap`).
+
+##### How CAPT runs the template
+
+A `v1alpha2` Workflow runs Tasks, not a Template. For each machine CAPT converts the template
+the way Tinkerbell converts a `v1alpha1` Template (see Tinkerbell's
+[v1alpha2 migration guide](https://github.com/tinkerbell-community/tinkerbell/blob/v0.27.0/docs/technical/v1alpha2/MIGRATION.md)):
+
+- **Natively**, when the template converts: CAPT creates one `Task` per template task, named
+  `<machine>-<task>`, and a Workflow that runs them. No `Template` is created. A template
+  converts when its structure does not depend on templating: every `{{ }}` is a single
+  expression inside a string value, there is no `range`, `if`, `with` or `define` around
+  tasks or actions, no `toYaml`/`nindent`, and every variable it uses has a `v1alpha2`
+  equivalent (`.device_1`, `.Hardware.Disks` as a whole expression, `.Hardware.UserData`,
+  `.Hardware.Metadata.Instance.ID`, ...). The template may have several tasks only when the
+  machine has no boot options (CAPT always toggles netboot, so in practice: a single task).
+- **In `v1alpha1` compatibility mode** otherwise: CAPT creates the machine's `Template`, as it
+  did before, and a Workflow that runs it, which Tinkerbell renders exactly as it rendered
+  `v1alpha1` Workflows. CAPT records why on the Workflow (annotation
+  `capt.tinkerbell.org/v1alpha1-compatibility`) and as an event on the `TinkerbellMachine`.
+  The example below runs in compatibility mode: `formatPartition ( index .Hardware.Disks 0 ) 3`
+  nests the disk inside another call, which the conversion does not translate.
+
+Both modes provision the machine the same way; nothing needs to change in existing templates.
+A machine whose `Template` an earlier CAPT created keeps running it.
 
 ##### Template selection precedence
 
-When CAPT creates a Tinkerbell Template for a machine, it evaluates these sources in order
+When CAPT resolves the template for a machine, it evaluates these sources in order
 and uses the first one found:
 
 1. **`TinkerbellMachineTemplate.spec.template.spec.templateInline`** (or `templateRef`) — machine-level template, set directly in the CAPI manifest.
@@ -383,7 +425,7 @@ will not be applied to the machine.
 **`PROVIDER_ID` placeholder:** CAPT looks for the literal string `PROVIDER_ID` in the
 bootstrap cloud-config (from the CAPI `Machine`'s bootstrap `Secret`) and replaces it with
 the actual provider ID (`tinkerbell://<namespace>/<hardware-name>`) before writing the
-data to `Hardware.spec.userData`. If you are using the default CAPI Kubeadm bootstrap
+data to `Hardware.spec.instance.userdata` (`spec.userData` in `v1alpha1`). If you are using the default CAPI Kubeadm bootstrap
 provider, this is handled automatically and no action is needed. This is only relevant
 if you are using a custom (non-Kubeadm) bootstrap provider that generates its own
 cloud-config — in that case, include the literal string `PROVIDER_ID` wherever the
@@ -403,11 +445,15 @@ environment (HookOS). Available modes:
 | `iso` | Deprecated alias for `isoboot`. Use `isoboot` instead. |
 | `customboot` | Custom BMC boot actions |
 
-**NOTE:** Boot modes only take effect when the Hardware has `spec.bmcRef` set (see
+**NOTE:** Boot modes only take effect when the Hardware has a BMC (see
 [Hardware requirements](#create-hardware-resources-to-make-tinkerbell-hardware-available)).
 When using `iso` or `isoboot`, the `bootOptions.isoURL` field is required. CAPT inserts
-the Hardware's `spec.metadata.instance.id` (with `:` replaced by `-`) into the ISO URL
-path to enable per-hardware ISO customization.
+the Hardware's `spec.instance.lookupID` (with `:` replaced by `-`) into the ISO URL
+path to enable per-hardware ISO customization. The `customboot` actions keep their `v1alpha1`
+form in the `TinkerbellMachineTemplate`; CAPT converts each to the `v1alpha2` bmc operations
+it sets. Customboot actions whose values are templated (for example a media URL that uses
+`.Hardware.Interfaces`) make the machine's Workflow run in compatibility mode, where they are
+rendered with `v1alpha1` Hardware data as before.
 
 ##### Provisioned annotation
 
@@ -499,7 +545,7 @@ kubectl delete cluster capi-quickstart
 **IMPORTANT:** Always delete the Cluster object (`kubectl delete cluster <name>`) rather than
 deleting the full manifest (`kubectl delete -f capi-quickstart.yaml`). CAPI's Cluster controller
 orchestrates cascading deletion in the correct order — Machines are drained and deprovisioned
-before infrastructure is torn down, and Tinkerbell resources (Templates, Workflows) are cleaned
+before infrastructure is torn down, and Tinkerbell resources (Workflows, Tasks, Templates) are cleaned
 up by CAPT's finalizers. Deleting with `-f` sends parallel delete requests that can bypass this
 ordering and leave Hardware stuck with finalizers or orphaned Workflows.
 
@@ -522,3 +568,4 @@ ordering and leave Hardware stuck with finalizers or orphaned Workflows.
 [Helm]: https://helm.sh/docs/intro/install/
 [Tinkerbell]: https://tinkerbell.org
 [Tinkerbell stack]: https://github.com/tinkerbell/tinkerbell/tree/main/helm/tinkerbell#readme
+[tinkerbell-community]: https://github.com/tinkerbell-community/tinkerbell

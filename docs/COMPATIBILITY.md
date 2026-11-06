@@ -1,6 +1,74 @@
 # Compatibility
 
-This document describes the version compatibility between CAPT (Cluster API Provider Tinkerbell) and Cluster API (CAPI).
+This document describes the version compatibility between CAPT (Cluster API Provider Tinkerbell) and Cluster API (CAPI),
+and between CAPT and Tinkerbell.
+
+## Tinkerbell
+
+CAPT requires Tinkerbell from [tinkerbell-community](https://github.com/tinkerbell-community/tinkerbell)
+**v0.27.0 or later**. It reads and writes Hardware, Workflows, Tasks and bmc Jobs as
+`tinkerbell.org/v1alpha2` and `bmc.tinkerbell.org/v1alpha2`, which Tinkerbell stores from v0.27.0 on.
+Earlier CAPT releases use the deprecated `v1alpha1` kinds; Tinkerbell v0.27 still serves those
+through its conversion webhook, so upgrade Tinkerbell first, then CAPT. CAPT builds against the
+fork's API module (`github.com/tinkerbell-community/tinkerbell/api` v0.27.1, replacing
+`github.com/tinkerbell/tinkerbell/api`) and uses its `conversion` package, so it maps the two
+versions exactly as Tinkerbell's conversion webhook does.
+
+| Object | API version | What CAPT does with it |
+|---|---|---|
+| `Hardware` | `tinkerbell.org/v1alpha2` | Selects and claims it (labels, finalizer), writes `spec.instance.userdata`, the IPAM address, and the provisioned annotation, all as merge patches of those fields only |
+| `Workflow` | `tinkerbell.org/v1alpha2` | Creates one per machine; follows `status.metadata.workflow.state` |
+| `Task` | `tinkerbell.org/v1alpha2` | Creates the machine's template tasks, `<machine>-<task>`, for a Workflow that runs natively |
+| `Template` | `tinkerbell.org/v1alpha1` | Reads the Templates `templateRef` and the template override annotation name; creates the machine's Template for a Workflow in compatibility mode |
+| `Job` | `bmc.tinkerbell.org/v1alpha2` | Creates power off (deletion) and power cycle (in-place recovery) Jobs that reference the Hardware |
+
+The `TinkerbellMachine`/`TinkerbellMachineTemplate` API is unchanged: the template is still a
+`v1alpha1` Template definition, and `bootOptions` keep their `v1alpha1` boot mode and customboot
+actions, which CAPT converts to `v1alpha2` itself.
+
+### Workflows: native or v1alpha1 compatibility mode
+
+CAPT builds the `v1alpha1` Workflow it has always created (the machine's Template, its Hardware,
+`device_1`, the boot options) and converts it to `v1alpha2` with Tinkerbell's conversion. Then:
+
+- If the template converts to `v1alpha2` Tasks and the Workflow can run them, CAPT creates the
+  Tasks and a Workflow that runs them, and no Template. This is what Tinkerbell itself does to a
+  `v1alpha1` Workflow whose Template converts.
+- Otherwise CAPT creates the machine's Template and the converted Workflow, which Tinkerbell runs
+  in `v1alpha1` compatibility mode, rendering the Template exactly as before. The Workflow's
+  `capt.tinkerbell.org/v1alpha1-compatibility` annotation and an event on the `TinkerbellMachine`
+  say why: the template's structure depends on templating (`range`, `if`, `toYaml`, a disk index
+  nested in another call such as `formatPartition`, ...), it has several tasks (CAPT's Workflow
+  always has boot options, which `v1alpha2` applies per task), its customboot actions are
+  templated, a Task of the same name already exists, or the machine's Template already exists
+  (a machine an earlier CAPT started).
+
+Either way a `v1alpha1` client reads back the Workflow CAPT created before (the deprecated `iso`
+boot mode reads back as `isoboot`). Deleting a machine removes its Workflow, Tasks and Template.
+See [How CAPT runs the template](QUICK-START.md#how-capt-runs-the-template).
+
+### Hardware fields CAPT uses
+
+| v1alpha1 | v1alpha2 |
+|---|---|
+| `spec.disks[].device` | `spec.storageDevices[].name` |
+| `spec.userData` | `spec.instance.userdata` |
+| `spec.metadata.instance.id` (`device_1`, ISO URL) | `spec.instance.lookupID`, or `spec.agentID` when it is empty |
+| `spec.interfaces[0]` (node address, IPAM interface) | the primary interface: for Hardware created through `v1alpha1` its first interface with a MAC, otherwise the one `spec.agentID` names, otherwise the lowest MAC |
+| `spec.interfaces[].dhcp.ip` `address`, `netmask`, `gateway` | `spec.networkInterfaces[<mac>].ipam.ipv4` (or `ipv6`) `address`, `prefix`, `gateway` |
+| `spec.bmcRef` | `spec.bmc.connection`, or for Hardware created through `v1alpha1` the `bmcRef` its conversion annotation keeps |
+
+CAPT does not read any other `metadata.instance` field, and does not toggle netboot itself
+(Tinkerbell does, from the Workflow's boot options). Hardware created through `v1alpha1` keeps
+its `conversion.tinkerbell.org/v1alpha1` annotation, and with it every `v1alpha1`-only field,
+across CAPT's writes.
+
+### RBAC
+
+On the Tinkerbell cluster CAPT needs, in addition to what earlier releases needed, `tasks`
+(`tinkerbell.org`): get, list, watch, create, update, patch, delete. On the management cluster it
+records events. See [REMOTE-TINKERBELL-KUBECONFIG.md](REMOTE-TINKERBELL-KUBECONFIG.md) for an
+external Tinkerbell cluster.
 
 ## Version Matrix
 

@@ -21,6 +21,14 @@ deployments of Kubernetes, both on-premises and off.
 
 See the [Quick Start](docs/QUICK-START.md).
 
+## Tinkerbell
+
+CAPT requires Tinkerbell from [tinkerbell-community](https://github.com/tinkerbell-community/tinkerbell)
+v0.27.0 or later: it reads and writes Hardware, Workflows, Tasks and bmc Jobs as `v1alpha2`.
+A machine's template runs natively as `v1alpha2` Tasks when it converts, and otherwise as a
+`v1alpha1` Template in Tinkerbell's compatibility mode. See
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#tinkerbell).
+
 ## IPAM
 
 Machines can take their address from a Cluster API IPAM pool. See [docs/IPAM.md](docs/IPAM.md).

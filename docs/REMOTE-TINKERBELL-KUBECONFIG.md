@@ -8,25 +8,29 @@ and all available configuration flags.
 
 ## Required Permissions
 
-CAPT performs the following operations on Tinkerbell CRDs in the external cluster:
+CAPT performs the following operations on Tinkerbell CRDs in the external cluster
+(Hardware, Workflows, Tasks and Jobs as `v1alpha2`, Templates as `v1alpha1`; see
+[Compatibility](COMPATIBILITY.md#tinkerbell)):
 
 | Resource | API Group | Verbs |
 |---|---|---|
 | `hardware` | `tinkerbell.org` | get, list, patch |
 | `templates` | `tinkerbell.org` | get, create, delete |
+| `tasks` | `tinkerbell.org` | get, list, watch, create, update, delete |
 | `workflows` | `tinkerbell.org` | get, list, watch, create, delete |
 | `jobs` | `bmc.tinkerbell.org` | get, list, watch, create |
 
-`watch` is required on Workflow and Job because CAPT runs an informer cache that
-reacts to status changes on these objects in real time. Hardware is accessed via
-direct API calls (not cached), so `watch` is not needed.
+`watch` is required on Workflow, Task and Job because CAPT runs an informer cache that
+reacts to changes on these objects in real time. Hardware is accessed via
+direct API calls (not cached), so `watch` is not needed. CAPT lists a machine's Tasks
+by label to remove them, and updates them when it recreates a machine's Workflow.
 
 > **Note:** Hardware `list` requires **cluster-wide** access (ClusterRole +
 > ClusterRoleBinding) because CAPT discovers available Hardware across all
 > namespaces before a target namespace is known. A namespace-scoped Role is
 > not sufficient for Hardware — the API server will reject a non-namespaced
 > list request with 403 Forbidden rather than filtering to authorized
-> namespaces. Templates, Workflows, and Jobs can use either cluster-wide or
+> namespaces. Templates, Tasks, Workflows, and Jobs can use either cluster-wide or
 > namespace-scoped RBAC since they are created in the Hardware's namespace
 > after selection.
 
@@ -53,7 +57,7 @@ kubectl create serviceaccount capt-remote -n tinkerbell
 
 #### Scoped to a Single Namespace (Role + RoleBinding)
 
-Hardware requires a ClusterRole (see note above), but Template, Workflow, and
+Hardware requires a ClusterRole (see note above), but Template, Task, Workflow, and
 Job access can be scoped to one namespace:
 
 ```yaml
@@ -91,6 +95,9 @@ rules:
   resources: ["templates"]
   verbs: ["get", "create", "delete"]
 - apiGroups: ["tinkerbell.org"]
+  resources: ["tasks"]
+  verbs: ["get", "list", "watch", "create", "update", "delete"]
+- apiGroups: ["tinkerbell.org"]
   resources: ["workflows"]
   verbs: ["get", "list", "watch", "create", "delete"]
 - apiGroups: ["bmc.tinkerbell.org"]
@@ -115,7 +122,7 @@ roleRef:
 #### Scoped to Multiple Namespaces (Roles + RoleBindings)
 
 When Hardware exists in several namespaces but you do not want to grant
-cluster-wide access for Templates, Workflows, and Jobs, create a Role and
+cluster-wide access for Templates, Tasks, Workflows, and Jobs, create a Role and
 RoleBinding **in each namespace**. Hardware still requires a ClusterRole because
 CAPT searches for available Hardware across all namespaces.
 
@@ -159,6 +166,9 @@ rules:
   resources: ["templates"]
   verbs: ["get", "create", "delete"]
 - apiGroups: ["tinkerbell.org"]
+  resources: ["tasks"]
+  verbs: ["get", "list", "watch", "create", "update", "delete"]
+- apiGroups: ["tinkerbell.org"]
   resources: ["workflows"]
   verbs: ["get", "list", "watch", "create", "delete"]
 - apiGroups: ["bmc.tinkerbell.org"]
@@ -194,6 +204,9 @@ rules:
 - apiGroups: ["tinkerbell.org"]
   resources: ["templates"]
   verbs: ["get", "create", "delete"]
+- apiGroups: ["tinkerbell.org"]
+  resources: ["tasks"]
+  verbs: ["get", "list", "watch", "create", "update", "delete"]
 - apiGroups: ["tinkerbell.org"]
   resources: ["workflows"]
   verbs: ["get", "list", "watch", "create", "delete"]
@@ -237,6 +250,9 @@ rules:
 - apiGroups: ["tinkerbell.org"]
   resources: ["templates"]
   verbs: ["get", "create", "delete"]
+- apiGroups: ["tinkerbell.org"]
+  resources: ["tasks"]
+  verbs: ["get", "list", "watch", "create", "update", "delete"]
 - apiGroups: ["tinkerbell.org"]
   resources: ["workflows"]
   verbs: ["get", "list", "watch", "create", "delete"]

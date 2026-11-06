@@ -36,9 +36,11 @@ kind. With the [UniFi provider](https://github.com/ubiquiti-community/cluster-ap
    controller-owned by the `TinkerbellMachine`, with `spec.clusterName` and the
    `cluster.x-k8s.io/cluster-name` label set.
 3. The IPAM provider binds an `IPAddress` to the claim.
-4. CAPT writes the address, netmask (from the prefix) and gateway into
-   `spec.interfaces[].dhcp.ip` on the Hardware, on the interface whose `dhcp.mac` matches the
-   MAC recorded on the claim. smee then hands the machine that address.
+4. CAPT writes the address, prefix and gateway into
+   `spec.networkInterfaces[<mac>].ipam.ipv4` on the Hardware (`ipam.ipv6` for an IPv6
+   address), on the interface keyed by the MAC recorded on the claim. smee then hands the
+   machine that address. (A v1alpha1 client sees it as the interface's `dhcp.ip`, with the
+   prefix as a netmask, where CAPT wrote it before.)
 5. `status.addresses` reports it, and provisioning continues.
 
 Until step 3 completes the machine waits, with:
@@ -53,9 +55,18 @@ status:
 
 ## Which interface
 
-The primary interface, `spec.interfaces[0]`, the same one CAPT already reports the node
-address from. Its `dhcp.mac` must be set; that MAC is recorded on the claim as
-`capt.tinkerbell.org/mac-address` and is the key the address is written back under.
+The primary interface, the same one CAPT reports the node address from. v1alpha2 Hardware
+keys its interfaces by MAC, so they have no order; the primary interface is:
+
+1. for Hardware created through v1alpha1, its first v1alpha1 interface that has a MAC, which
+   is the interface CAPT used before (the v1alpha1 order survives in the conversion
+   annotation);
+2. otherwise the interface `spec.agentID` names;
+3. otherwise the interface with the lowest MAC.
+
+Its MAC is recorded on the claim as `capt.tinkerbell.org/mac-address` and is the key the
+address is written back under, so a later change of primary interface does not move an
+existing reservation.
 
 ## What the claim tells the provider
 
@@ -71,16 +82,20 @@ The hostname is the Hardware's, not the Machine's: Machines are renamed by every
 while the box keeps its name, and CAPI links the two by `providerID`, never by name.
 Claims made by an earlier CAPT get both annotations on their next reconcile.
 
-One address per machine. A Tinkerbell interface holds one `dhcp.ip`, so dual-stack is not
-expressible on the Hardware side today.
+One address per machine. A v1alpha2 interface can hold an IPv4 and an IPv6 configuration, but
+CAPT claims a single address, of whichever family the pool hands out.
 
-## Ownership of `dhcp.ip`
+## Ownership of the address
 
-When `addressFromPool` is set, CAPT owns `dhcp.ip` on that interface: it writes it when the
-claim is bound, re-asserts it on every reconcile, and clears it when the machine is deleted,
-in the same patch that clears `spec.userData`. Do not also set it by hand.
+When `addressFromPool` is set, CAPT owns the `address`, `prefix` and `gateway` of that
+interface's `ipam.ipv4` (or `ipam.ipv6`): it writes them when the claim is bound, re-asserts
+them on every reconcile, and clears them when the machine is deleted, in the same patch that
+clears `spec.instance.userdata`. Do not also set them by hand. The rest of that IP
+configuration (hostname, nameservers, NTP servers, VLAN, routes, search domains) and the other
+address family are not CAPT's: it never writes them, and every write is a merge patch of the
+three fields only.
 
-Without `addressFromPool` nothing changes: CAPT reads `dhcp.ip` and never writes it.
+Without `addressFromPool` nothing changes: CAPT reads the address and never writes it.
 
 ## Why the claim is named after the Hardware
 
@@ -110,10 +125,17 @@ asynchronously.
 
 ## Interaction with other Hardware writers
 
-`spec.interfaces` is an atomic list under server-side apply. A controller that applies the
-interfaces list (the Tinkerbell BMC discovery controller does) must carry the live `dhcp.ip`
-forward, as it already does for `netboot`, or each re-apply drops the reservation until
-CAPT's next reconcile.
+`spec.networkInterfaces` is a map, so a merge patch of one interface's address leaves the
+rest of the Hardware alone. CAPT still writes the address with an optimistic lock: a
+concurrent write to the Hardware (another controller re-applying it, an interface removed
+meanwhile) makes CAPT retry against the current object rather than recreate what was
+removed.
+
+Unlike v1alpha1's `spec.interfaces`, which was an atomic list under server-side apply, the
+map and its fields are granular: CAPT's patches make it the owner of the fields it writes, and
+an apply by another controller (the Tinkerbell BMC discovery controller, say) that does not set
+them leaves them alone. A controller that does set an interface's address takes it over, and
+conflicts with CAPT's ownership unless it forces the apply.
 
 ## Immutability
 
