@@ -1,17 +1,21 @@
 package machine
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/tinkerbell/tinkerbell/api/conversion"
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -45,61 +49,173 @@ var (
 	// ErrHardwareMissingInterfaces is the error returned when the referenced hardware does not have any
 	// network interfaces defined.
 	ErrHardwareMissingInterfaces = fmt.Errorf("hardware has no interfaces defined")
-	// ErrHardwareFirstInterfaceNotDHCP is the error returned when the referenced hardware does not have it's
-	// first network interface configured for DHCP.
-	ErrHardwareFirstInterfaceNotDHCP = fmt.Errorf("hardware's first interface has no DHCP address defined")
-	// ErrHardwareFirstInterfaceDHCPMissingIP is the error returned when the referenced hardware does not have a
-	// DHCP IP address assigned for it's first interface.
-	ErrHardwareFirstInterfaceDHCPMissingIP = fmt.Errorf("hardware's first interface has no DHCP IP address defined")
-	// ErrHardwareMissingDiskConfiguration is returned when the referenced hardware is missing
-	// disk configuration.
+	// ErrHardwareFirstInterfaceNotDHCP is the error returned when the referenced hardware's primary
+	// network interface (see primaryInterfaceMAC) has no IPAM configuration.
+	ErrHardwareFirstInterfaceNotDHCP = fmt.Errorf("hardware's primary interface has no IPAM configuration defined")
+	// ErrHardwareFirstInterfaceDHCPMissingIP is the error returned when the referenced hardware's primary
+	// network interface has no IP address in its IPAM configuration.
+	ErrHardwareFirstInterfaceDHCPMissingIP = fmt.Errorf("hardware's primary interface has no IP address defined")
+	// ErrHardwareMissingDiskConfiguration is returned when the referenced hardware has no storage
+	// devices (spec.storageDevices).
 	ErrHardwareMissingDiskConfiguration = fmt.Errorf("disk configuration is required")
 	// errHardwareClaimRequeue marks expected claim contention that should be retried
 	// without surfacing a reconciliation error.
 	errHardwareClaimRequeue = errors.New("hardware claim requires requeue")
 )
 
-// hardwareIP returns the IP address of the first network interface of the given hardware.
-func hardwareIP(hardware *tinkv1.Hardware) (string, error) {
+// hardwareIP returns the IP address of the primary network interface of the given hardware (see
+// primaryInterface): its IPv4 address, or its IPv6 address when it has no IPv4 one. A v1alpha1
+// interface held a single address of either family, which converts to one of the two.
+func hardwareIP(hardware *tinkv2.Hardware) (string, error) {
 	if hardware == nil {
 		return "", ErrHardwareIsNil
 	}
 
-	if len(hardware.Spec.Interfaces) == 0 {
-		return "", ErrHardwareMissingInterfaces
+	mac, err := primaryInterface(hardware)
+	if err != nil {
+		return "", err
 	}
 
-	if hardware.Spec.Interfaces[0].DHCP == nil {
+	ipam := hardware.Spec.NetworkInterfaces[mac].IPAM
+	if ipam == nil || (ipam.IPv4 == nil && ipam.IPv6 == nil) {
 		return "", ErrHardwareFirstInterfaceNotDHCP
 	}
 
-	if hardware.Spec.Interfaces[0].DHCP.IP == nil {
-		return "", ErrHardwareFirstInterfaceDHCPMissingIP
+	for _, ip := range []*tinkv2.IP{ipam.IPv4, ipam.IPv6} {
+		if ip != nil && ip.Address != "" {
+			return ip.Address, nil
+		}
 	}
 
-	if hardware.Spec.Interfaces[0].DHCP.IP.Address == "" {
-		return "", ErrHardwareFirstInterfaceDHCPMissingIP
-	}
-
-	return hardware.Spec.Interfaces[0].DHCP.IP.Address, nil
+	return "", ErrHardwareFirstInterfaceDHCPMissingIP
 }
 
-// patchHardwareStates patches a hardware's metadata and instance states.
-func (scope *machineReconcileScope) patchHardwareAnnotations(hw *tinkv1.Hardware, annotations map[string]string) error {
-	patchHelper, err := patch.NewHelper(hw, scope.tinkerbellClient)
-	if err != nil {
-		return fmt.Errorf("initializing patch helper for selected hardware: %w", err)
+// primaryInterface returns the key of the network interface CAPT treats as the Hardware's primary
+// one: the interface it reports the node address from and reserves IPAM addresses for.
+//
+// v1alpha1 listed interfaces and CAPT used the first; v1alpha2 keys them by MAC, so they have no
+// order. The primary interface is, in order of preference:
+//   - for Hardware created through v1alpha1, its first v1alpha1 interface that has a MAC: the
+//     interface CAPT has always used. The v1alpha1 order survives in the conversion annotation.
+//   - the interface spec.agentID names; an Agent's ID is typically its primary interface's MAC.
+//   - the interface with the lowest MAC, the order Tinkerbell itself walks interfaces in.
+func primaryInterface(hw *tinkv2.Hardware) (tinkv2.MAC, error) {
+	if hw == nil {
+		return "", ErrHardwareIsNil
 	}
+
+	if len(hw.Spec.NetworkInterfaces) == 0 {
+		return "", ErrHardwareMissingInterfaces
+	}
+
+	if mac, ok := v1alpha1PrimaryInterface(hw); ok {
+		return mac, nil
+	}
+
+	if mac, ok := interfaceKey(hw, hw.Spec.AgentID); ok {
+		return mac, nil
+	}
+
+	return slices.Sorted(maps.Keys(hw.Spec.NetworkInterfaces))[0], nil
+}
+
+// v1alpha1PrimaryInterface returns the key of the network interface that is the first interface
+// with a MAC in hw's v1alpha1 form, when hw was created through v1alpha1.
+func v1alpha1PrimaryInterface(hw *tinkv2.Hardware) (tinkv2.MAC, bool) {
+	if _, ok := hw.Annotations[conversion.AnnotationV1Alpha1]; !ok {
+		return "", false
+	}
+
+	v1 := &tinkv1.Hardware{}
+	if err := conversion.HardwareToV1Alpha1(hw, v1); err != nil {
+		return "", false
+	}
+
+	for _, iface := range v1.Spec.Interfaces {
+		if iface.DHCP == nil {
+			continue
+		}
+
+		if mac, ok := interfaceKey(hw, iface.DHCP.MAC); ok {
+			return mac, true
+		}
+	}
+
+	return "", false
+}
+
+// interfaceKey returns the key of hw's network interface whose MAC is mac. MACs are compared
+// case-insensitively: v1alpha2 keys are lower case, MACs recorded elsewhere need not be.
+func interfaceKey(hw *tinkv2.Hardware, mac string) (tinkv2.MAC, bool) {
+	if mac == "" {
+		return "", false
+	}
+
+	if _, ok := hw.Spec.NetworkInterfaces[tinkv2.MAC(mac)]; ok {
+		return tinkv2.MAC(mac), true
+	}
+
+	for key := range hw.Spec.NetworkInterfaces {
+		if strings.EqualFold(string(key), mac) {
+			return key, true
+		}
+	}
+
+	return "", false
+}
+
+// hardwareLookupID is the identifier CAPT hands a Workflow as device_1, the Agent a template's
+// tasks run on, and puts in per-machine ISO URLs: spec.instance.lookupID, where v1alpha1's
+// metadata.instance.id converts to. Hardware without a lookupID falls back to its spec.agentID,
+// the Agent's ID in v1alpha2.
+func hardwareLookupID(hw *tinkv2.Hardware) string {
+	var lookupID string
+	if hw.Spec.Instance != nil {
+		lookupID = hw.Spec.Instance.LookupID
+	}
+
+	return cmp.Or(lookupID, hw.Spec.AgentID)
+}
+
+// hasBMC reports whether Rufio can reach hw's BMC from a Job that references hw: hw has its own
+// spec.bmc.connection, or it was created through v1alpha1 with a bmcRef naming a deprecated bmc
+// Machine, which Rufio still resolves through the Hardware.
+func hasBMC(hw *tinkv2.Hardware) bool {
+	if hw == nil {
+		return false
+	}
+
+	if hw.Spec.BMC != nil && hw.Spec.BMC.Connection != nil {
+		return true
+	}
+
+	ref := conversion.HardwareBMCRef(hw)
+
+	return ref != nil && ref.Name != ""
+}
+
+// hardwareUserData returns hw's spec.instance.userdata, or nil when it is not set.
+func hardwareUserData(hw *tinkv2.Hardware) *string {
+	if hw.Spec.Instance == nil {
+		return nil
+	}
+
+	return hw.Spec.Instance.Userdata
+}
+
+// patchHardwareAnnotations adds annotations to the Hardware. The merge patch carries only them, so
+// nothing else on the Hardware, such as the conversion annotation of Hardware created through
+// v1alpha1, is touched.
+func (scope *machineReconcileScope) patchHardwareAnnotations(hw *tinkv2.Hardware, annotations map[string]string) error {
+	base := hw.DeepCopy()
 
 	if hw.Annotations == nil {
 		hw.Annotations = map[string]string{}
 	}
 
-	for k, v := range annotations {
-		hw.Annotations[k] = v
-	}
+	maps.Copy(hw.Annotations, annotations)
 
-	if err := patchHelper.Patch(scope.ctx, hw); err != nil {
+	if err := scope.tinkerbellClient.Patch(scope.ctx, hw, client.MergeFrom(base)); err != nil {
 		return fmt.Errorf("patching Hardware object: %w", err)
 	}
 
@@ -108,14 +224,14 @@ func (scope *machineReconcileScope) patchHardwareAnnotations(hw *tinkv1.Hardware
 
 // hardwareAlreadyClaimed reports whether hw already carries this Machine's ownership
 // labels and the expected finalizer state, i.e. a claim would have nothing to write.
-func (scope *machineReconcileScope) hardwareAlreadyClaimed(hw *tinkv1.Hardware) bool {
+func (scope *machineReconcileScope) hardwareAlreadyClaimed(hw *tinkv2.Hardware) bool {
 	return hw.Labels[HardwareOwnerNameLabel] == scope.tinkerbellMachine.Name &&
 		hw.Labels[HardwareOwnerNamespaceLabel] == scope.tinkerbellMachine.Namespace &&
 		controllerutil.ContainsFinalizer(hw, infrastructurev1.MachineFinalizer) &&
 		!controllerutil.ContainsFinalizer(hw, infrastructurev1.MachineLegacyFinalizer)
 }
 
-func (scope *machineReconcileScope) takeHardwareOwnership(hw *tinkv1.Hardware) error {
+func (scope *machineReconcileScope) takeHardwareOwnership(hw *tinkv2.Hardware) error {
 	// hardwareForMachine() returns already-assigned Hardware for this Machine first,
 	// otherwise lists unowned Hardware and returns the first element after a
 	// deterministic sort — so two Machines reconciling concurrently can still select
@@ -166,25 +282,30 @@ func (scope *machineReconcileScope) takeHardwareOwnership(hw *tinkv1.Hardware) e
 	return nil
 }
 
-func (scope *machineReconcileScope) ensureHardwareUserData(hw *tinkv1.Hardware, providerID string) error {
+func (scope *machineReconcileScope) ensureHardwareUserData(hw *tinkv2.Hardware, providerID string) error {
 	userData := strings.ReplaceAll(scope.bootstrapCloudConfig, providerIDPlaceholder, providerID)
 
-	if hw.Spec.UserData == nil || *hw.Spec.UserData != userData {
-		patchHelper, err := patch.NewHelper(hw, scope.tinkerbellClient)
-		if err != nil {
-			return fmt.Errorf("initializing patch helper for selected hardware: %w", err)
-		}
+	if current := hardwareUserData(hw); current != nil && *current == userData {
+		return nil
+	}
 
-		hw.Spec.UserData = &userData
-		if err := patchHelper.Patch(scope.ctx, hw); err != nil {
-			return fmt.Errorf("patching Hardware object: %w", err)
-		}
+	base := hw.DeepCopy()
+
+	if hw.Spec.Instance == nil {
+		hw.Spec.Instance = &tinkv2.Instance{}
+	}
+
+	hw.Spec.Instance.Userdata = &userData
+
+	// The merge patch carries spec.instance.userdata alone; the rest of spec.instance is not CAPT's.
+	if err := scope.tinkerbellClient.Patch(scope.ctx, hw, client.MergeFrom(base)); err != nil {
+		return fmt.Errorf("patching Hardware object: %w", err)
 	}
 
 	return nil
 }
 
-func (scope *machineReconcileScope) ensureHardware() (*tinkv1.Hardware, error) {
+func (scope *machineReconcileScope) ensureHardware() (*tinkv2.Hardware, error) {
 	hw, err := scope.hardwareForMachine()
 	if err != nil {
 		return nil, fmt.Errorf("getting hardware: %w", err)
@@ -226,7 +347,7 @@ func (scope *machineReconcileScope) ensureHardware() (*tinkv1.Hardware, error) {
 	return hw, nil
 }
 
-func (scope *machineReconcileScope) hardwareForMachine() (*tinkv1.Hardware, error) {
+func (scope *machineReconcileScope) hardwareForMachine() (*tinkv2.Hardware, error) {
 	// first query for hardware that's already assigned
 	if hardware, err := scope.assignedHardware(); err != nil {
 		return nil, err
@@ -244,12 +365,12 @@ func (scope *machineReconcileScope) hardwareForMachine() (*tinkv1.Hardware, erro
 		hardwareSelector.Required = append(hardwareSelector.Required, infrastructurev1.HardwareAffinityTerm{})
 	}
 
-	var matchingHardware []tinkv1.Hardware
+	var matchingHardware []tinkv2.Hardware
 
 	// OR all of the required terms by selecting each individually, we could end up with duplicates in matchingHardware
 	// but it doesn't matter
 	for i := range hardwareSelector.Required {
-		var matched tinkv1.HardwareList
+		var matched tinkv2.HardwareList
 
 		// add a selector for unselected hardware
 		hardwareSelector.Required[i].LabelSelector.MatchExpressions = append(
@@ -288,7 +409,7 @@ func (scope *machineReconcileScope) hardwareForMachine() (*tinkv1.Hardware, erro
 
 // assignedHardware returns hardware that is already assigned. In the event of no hardware being assigned, it returns
 // nil, nil.
-func (scope *machineReconcileScope) assignedHardware() (*tinkv1.Hardware, error) {
+func (scope *machineReconcileScope) assignedHardware() (*tinkv2.Hardware, error) {
 	listOpts := []client.ListOption{
 		client.MatchingLabels{
 			HardwareOwnerNameLabel:      scope.tinkerbellMachine.Name,
@@ -296,7 +417,7 @@ func (scope *machineReconcileScope) assignedHardware() (*tinkv1.Hardware, error)
 		},
 	}
 
-	var selectedHardware tinkv1.HardwareList
+	var selectedHardware tinkv2.HardwareList
 	if err := scope.tinkerbellClient.List(scope.ctx, &selectedHardware, listOpts...); err != nil {
 		return nil, fmt.Errorf("listing hardware with owner: %w", err)
 	}
@@ -308,7 +429,7 @@ func (scope *machineReconcileScope) assignedHardware() (*tinkv1.Hardware, error)
 	return nil, nil
 }
 
-func byHardwareAffinity(hardware []tinkv1.Hardware, preferred []infrastructurev1.WeightedHardwareAffinityTerm) (func(i int, j int) bool, error) {
+func byHardwareAffinity(hardware []tinkv2.Hardware, preferred []infrastructurev1.WeightedHardwareAffinityTerm) (func(i int, j int) bool, error) {
 	scores := map[client.ObjectKey]int32{}
 	// compute scores for each item based on the preferred term weights
 	for _, term := range preferred {
@@ -344,35 +465,38 @@ func byHardwareAffinity(hardware []tinkv1.Hardware, preferred []infrastructurev1
 	}, nil
 }
 
-func (scope *machineReconcileScope) releaseHardware(hw *tinkv1.Hardware) error {
+func (scope *machineReconcileScope) releaseHardware(hw *tinkv2.Hardware) error {
 	base := hw.DeepCopy()
 
 	delete(hw.Labels, HardwareOwnerNameLabel)
 	delete(hw.Labels, HardwareOwnerNamespaceLabel)
 	delete(hw.Annotations, HardwareProvisionedAnnotation)
 
-	// CAPT is the sole writer of userData; clearing it in the same patch that
+	// CAPT is the sole writer of the user data; clearing it in the same patch that
 	// releases the Hardware keeps the machine configuration (cluster PKI,
-	// bootstrap token) from being served by hegel to whatever boots this
+	// bootstrap token) from being served by Tootles to whatever boots this
 	// hardware next.
-	hw.Spec.UserData = nil
+	if hw.Spec.Instance != nil {
+		hw.Spec.Instance.Userdata = nil
+	}
 
 	// The same holds for the DHCP reservation written from IPAM: the claim is released right
 	// after this, so the address must not stay reserved for this MAC.
 	if scope.tinkerbellMachine.Spec.AddressFromPool != nil {
-		mac, err := scope.ipamInterfaceMAC(hw)
+		mac, family, err := scope.ipamReservation(hw)
 		if err != nil {
 			return fmt.Errorf("resolving IPAM interface to clear: %w", err)
 		}
 
-		clearHardwareAddress(hw, mac)
+		clearHardwareAddress(hw, mac, family)
 	}
 
 	controllerutil.RemoveFinalizer(hw, infrastructurev1.MachineFinalizer)
 	controllerutil.RemoveFinalizer(hw, infrastructurev1.MachineLegacyFinalizer)
 
-	// The interfaces list is atomic, so this patch carries all of it; the optimistic lock
-	// keeps a concurrent interfaces write from being reverted to this copy.
+	// The merge patch carries only what changed above, but a merge patch replaces a list such as
+	// the finalizers wholesale, and would recreate an interface removed meanwhile. The optimistic
+	// lock turns such a concurrent write into a Conflict instead of a revert to this copy.
 	releasePatch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
 	if err := scope.tinkerbellClient.Patch(scope.ctx, hw, releasePatch); err != nil {
 		return fmt.Errorf("patching Hardware object: %w", err)
@@ -381,7 +505,7 @@ func (scope *machineReconcileScope) releaseHardware(hw *tinkv1.Hardware) error {
 	return nil
 }
 
-func (scope *machineReconcileScope) getHardwareForMachine(hardware *tinkv1.Hardware) error {
+func (scope *machineReconcileScope) getHardwareForMachine(hardware *tinkv2.Hardware) error {
 	namespacedName := types.NamespacedName{
 		Name:      scope.tinkerbellMachine.Spec.HardwareName,
 		Namespace: scope.tinkerbellNamespace(),

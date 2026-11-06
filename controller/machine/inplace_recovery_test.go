@@ -5,12 +5,16 @@ import (
 	"testing"
 	"time"
 
-	rufiov1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/bmc"
+	"github.com/google/go-cmp/cmp"
+	"github.com/tinkerbell/tinkerbell/api/conversion"
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
+	rufiov2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell/bmc"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -25,7 +29,7 @@ const recoveryJobName = "machine-1-inplace-recovery"
 
 // newRecoveryScope builds a scope whose TinkerbellMachine is owned by a Machine that has been
 // not-up-to-date for staleFor, optionally already mid in-place update.
-func newRecoveryScope(t *testing.T, updating bool, staleFor time.Duration, attempted bool) (*machineReconcileScope, *tinkv1.Hardware) {
+func newRecoveryScope(t *testing.T, updating bool, staleFor time.Duration, attempted bool) (*machineReconcileScope, *tinkv2.Hardware) {
 	t.Helper()
 
 	scheme := runtime.NewScheme()
@@ -87,9 +91,12 @@ func newRecoveryScope(t *testing.T, updating bool, staleFor time.Duration, attem
 		Status: infrastructurev1.TinkerbellMachineStatus{TargetNamespace: "default"},
 	}
 
-	hw := &tinkv1.Hardware{
+	hw := &tinkv2.Hardware{
 		ObjectMeta: metav1.ObjectMeta{Name: "hw-1", Namespace: "default"},
-		Spec:       tinkv1.HardwareSpec{BMCRef: &corev1.TypedLocalObjectReference{Kind: "Machine", Name: "bmc-1"}},
+		Spec: tinkv2.HardwareSpec{BMC: &tinkv2.BMC{Connection: &rufiov2.Connection{
+			Host:           "10.0.0.10",
+			CredentialsRef: rufiov2.SimpleReference{Name: "bmc-1-auth", Namespace: "default"},
+		}}},
 	}
 
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(machine, tinkerbellMachine).Build()
@@ -104,10 +111,10 @@ func newRecoveryScope(t *testing.T, updating bool, staleFor time.Duration, attem
 	}, hw
 }
 
-func getRecoveryJob(t *testing.T, scope *machineReconcileScope) *rufiov1.Job {
+func getRecoveryJob(t *testing.T, scope *machineReconcileScope) *rufiov2.Job {
 	t.Helper()
 
-	job := &rufiov1.Job{}
+	job := &rufiov2.Job{}
 
 	err := scope.tinkerbellClient.Get(scope.ctx,
 		types.NamespacedName{Namespace: "default", Name: recoveryJobName}, job)
@@ -177,16 +184,19 @@ func TestInPlaceRecovery_PowerCyclesStalledMachine(t *testing.T) {
 		t.Fatal("expected a power cycle job for a stalled in-place update")
 	}
 
-	if len(job.Spec.Tasks) != 2 {
-		t.Fatalf("expected an off/on pair, got %d tasks", len(job.Spec.Tasks))
+	want := rufiov2.JobSpec{
+		HardwareRef: &rufiov2.SimpleReference{Name: "hw-1", Namespace: "default"},
+		Operations: []rufiov2.Operations{
+			{PowerAction: ptr.To(rufiov2.PowerActionHardOff)},
+			{PowerAction: ptr.To(rufiov2.PowerActionOn)},
+		},
+	}
+	if diff := cmp.Diff(want, job.Spec); diff != "" {
+		t.Errorf("expected a hard off then on against the Hardware's BMC (-want +got):\n%s", diff)
 	}
 
-	if *job.Spec.Tasks[0].PowerAction != rufiov1.PowerHardOff {
-		t.Errorf("first task = %v, want hard off", *job.Spec.Tasks[0].PowerAction)
-	}
-
-	if *job.Spec.Tasks[1].PowerAction != rufiov1.PowerOn {
-		t.Errorf("second task = %v, want on", *job.Spec.Tasks[1].PowerAction)
+	if job.Labels[LabelMachineName] != "machine-1" || job.Labels[LabelMachineNamespace] != "default" {
+		t.Errorf("the Job must carry the machine's ownership labels, got %v", job.Labels)
 	}
 
 	updated := &infrastructurev1.TinkerbellMachine{}
@@ -237,12 +247,46 @@ func TestInPlaceRecovery_ClearsMarkerWhenUpdateFinishes(t *testing.T) {
 	}
 }
 
+// Hardware created through v1alpha1 names its BMC with a bmcRef to a bmc Machine, which only the
+// conversion annotation still holds. Rufio resolves it from the Hardware, so it is power cycled
+// like Hardware with its own connection.
+func TestInPlaceRecovery_PowerCyclesHardwareWithAV1Alpha1BMCRef(t *testing.T) {
+	t.Parallel()
+
+	scope, _ := newRecoveryScope(t, true, time.Hour, false)
+
+	v1 := &tinkv1.Hardware{
+		ObjectMeta: metav1.ObjectMeta{Name: "hw-1", Namespace: "default"},
+		Spec: tinkv1.HardwareSpec{
+			BMCRef:     &corev1.TypedLocalObjectReference{Kind: "Machine", Name: "bmc-1"},
+			Interfaces: []tinkv1.Interface{{DHCP: &tinkv1.DHCP{MAC: "00:00:00:00:00:01"}}},
+		},
+	}
+	hw := &tinkv2.Hardware{}
+	if err := conversion.HardwareToV1Alpha2(v1, hw); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := scope.reconcileInPlaceRecovery(hw, 20*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	job := getRecoveryJob(t, scope)
+	if job == nil {
+		t.Fatal("expected a power cycle job for Hardware whose BMC is a v1alpha1 bmc Machine")
+	}
+
+	if diff := cmp.Diff(&rufiov2.SimpleReference{Name: "hw-1", Namespace: "default"}, job.Spec.HardwareRef); diff != "" {
+		t.Errorf("the Job must reference the Hardware (-want +got):\n%s", diff)
+	}
+}
+
 // Without a BMC there is nothing to power cycle; that must be reported, not crash.
-func TestInPlaceRecovery_NoBMCRef(t *testing.T) {
+func TestInPlaceRecovery_NoBMC(t *testing.T) {
 	t.Parallel()
 
 	scope, hw := newRecoveryScope(t, true, time.Hour, false)
-	hw.Spec.BMCRef = nil
+	hw.Spec.BMC = nil
 
 	if err := scope.reconcileInPlaceRecovery(hw, 20*time.Minute); err != nil {
 		t.Fatal(err)

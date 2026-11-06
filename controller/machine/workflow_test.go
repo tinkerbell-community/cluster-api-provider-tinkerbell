@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega" //nolint:revive // one day we will remove gomega
-	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
@@ -31,16 +31,6 @@ import (
 // infrastructure provider's concern: a template reads that from the Hardware object itself.
 func Test_workflowTemplateData(t *testing.T) {
 	t.Parallel()
-	g := NewWithT(t)
-
-	hw := &tinkv1.Hardware{
-		ObjectMeta: metav1.ObjectMeta{Name: "myHardware", Namespace: "myNamespace"},
-		Spec: tinkv1.HardwareSpec{
-			Metadata: &tinkv1.HardwareMetadata{
-				Instance: &tinkv1.MetadataInstance{ID: "de:ad:be:ef:00:01"},
-			},
-		},
-	}
 
 	scope := &machineReconcileScope{
 		tinkerbellMachine: &infrastructurev1.TinkerbellMachine{
@@ -48,5 +38,38 @@ func Test_workflowTemplateData(t *testing.T) {
 		},
 	}
 
-	g.Expect(scope.workflowTemplateData(hw)).To(Equal(map[string]string{"device_1": "de:ad:be:ef:00:01"}))
+	cases := map[string]struct {
+		spec tinkv2.HardwareSpec
+		want string
+	}{
+		"the_lookup_id_where_v1alpha1_metadata_instance_id_converts_to": {
+			spec: tinkv2.HardwareSpec{
+				AgentID:  "52:54:00:00:00:01",
+				Instance: &tinkv2.Instance{LookupID: "de:ad:be:ef:00:01"},
+			},
+			want: "de:ad:be:ef:00:01",
+		},
+		"the_agent_id_when_there_is_no_lookup_id": {
+			spec: tinkv2.HardwareSpec{AgentID: "52:54:00:00:00:01", Instance: &tinkv2.Instance{}},
+			want: "52:54:00:00:00:01",
+		},
+		"the_agent_id_when_there_is_no_instance": {
+			spec: tinkv2.HardwareSpec{AgentID: "52:54:00:00:00:01"},
+			want: "52:54:00:00:00:01",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			hw := &tinkv2.Hardware{
+				ObjectMeta: metav1.ObjectMeta{Name: "myHardware", Namespace: "myNamespace"},
+				Spec:       tc.spec,
+			}
+
+			g.Expect(scope.workflowTemplateData(hw)).To(Equal(map[string]string{"device_1": tc.want}))
+		})
+	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega" //nolint:revive // one day we will remove gomega
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -324,7 +325,7 @@ func TestFinalizerMigration(t *testing.T) {
 			t.Parallel()
 
 			// Simulate the removal logic used in releaseHardware and removeFinalizer.
-			hw := &tinkv1.Hardware{
+			hw := &tinkv2.Hardware{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-hw",
 					Namespace:  "tinkerbell",

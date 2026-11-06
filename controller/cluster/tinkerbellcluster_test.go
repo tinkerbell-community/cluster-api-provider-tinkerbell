@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	"github.com/tinkerbell/cluster-api-provider-tinkerbell/controller"
@@ -110,35 +110,31 @@ type testOptions struct {
 	HardwareAffinity *infrastructurev1.HardwareAffinity
 }
 
-func validHardware(name, uuid, ip string, options ...testOptions) *tinkv1.Hardware {
-	hw := &tinkv1.Hardware{
+func validHardware(name, uuid, ip string, options ...testOptions) *tinkv2.Hardware {
+	hw := &tinkv2.Hardware{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: clusterNamespace,
 			UID:       types.UID(uuid),
 		},
-		Spec: tinkv1.HardwareSpec{
-			Disks: []tinkv1.Disk{
+		Spec: tinkv2.HardwareSpec{
+			StorageDevices: []tinkv2.StorageDevice{
 				{
-					Device: "/dev/sda",
+					Name: "/dev/sda",
 				},
 			},
-			Interfaces: []tinkv1.Interface{
-				{
-					DHCP: &tinkv1.DHCP{
-						IP: &tinkv1.IP{
+			NetworkInterfaces: tinkv2.NetworkInterfaces{
+				"52:54:00:00:00:01": {
+					IPAM: &tinkv2.IPAM{
+						IPv4: &tinkv2.IP{
 							Address: ip,
 						},
 					},
-					Netboot: &tinkv1.Netboot{
-						AllowPXE: new(true),
-					},
+					Netboot: &tinkv2.Netboot{},
 				},
 			},
-			Metadata: &tinkv1.HardwareMetadata{
-				Instance: &tinkv1.MetadataInstance{
-					ID: ip,
-				},
+			Instance: &tinkv2.Instance{
+				LookupID: ip,
 			},
 		},
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -37,7 +38,7 @@ func (scope *machineReconcileScope) getWorkflow() (*tinkv1.Workflow, error) {
 	return t, nil
 }
 
-func (scope *machineReconcileScope) createWorkflow(hw *tinkv1.Hardware) error {
+func (scope *machineReconcileScope) createWorkflow(hw *tinkv2.Hardware) error {
 	workflow := &tinkv1.Workflow{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      scope.tinkerbellMachine.Name,
@@ -59,7 +60,7 @@ func (scope *machineReconcileScope) createWorkflow(hw *tinkv1.Hardware) error {
 
 	// We check the BMCRef so that the implementation behaves similar to how it was when
 	// CAPT was creating the BMCJob.
-	if hw.Spec.BMCRef != nil {
+	if hasBMC(hw) {
 		switch scope.tinkerbellMachine.Spec.BootOptions.BootMode {
 		case tinkv1.BootModeNetboot:
 			workflow.Spec.BootOptions.BootMode = tinkv1.BootModeNetboot
@@ -74,7 +75,7 @@ func (scope *machineReconcileScope) createWorkflow(hw *tinkv1.Hardware) error {
 			}
 
 			urlPath, file := path.Split(u.Path)
-			u.Path = path.Join(urlPath, strings.Replace(hw.Spec.Metadata.Instance.ID, ":", "-", 5), file)
+			u.Path = path.Join(urlPath, strings.Replace(hardwareLookupID(hw), ":", "-", 5), file)
 
 			workflow.Spec.BootOptions.ISOURL = u.String()
 			workflow.Spec.BootOptions.BootMode = tinkv1.BootModeIsoboot
@@ -130,6 +131,6 @@ func (scope *machineReconcileScope) removeWorkflow() error {
 // Only the hardware identifier is supplied. Anything else a template needs, such as which
 // operating system image to write, belongs on the Hardware object, which the Workflow
 // controller exposes to templates in full. The infrastructure provider stays agnostic to it.
-func (scope *machineReconcileScope) workflowTemplateData(hw *tinkv1.Hardware) map[string]string {
-	return map[string]string{"device_1": hw.Spec.Metadata.Instance.ID}
+func (scope *machineReconcileScope) workflowTemplateData(hw *tinkv2.Hardware) map[string]string {
+	return map[string]string{"device_1": hardwareLookupID(hw)}
 }

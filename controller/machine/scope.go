@@ -34,6 +34,7 @@ import (
 
 	"github.com/go-logr/logr"
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	tinkcluster "github.com/tinkerbell/cluster-api-provider-tinkerbell/pkg/cluster"
@@ -88,7 +89,7 @@ type machineReconcileScope struct {
 
 	// reservedAddress is the IPAM address applied to the Hardware during this reconcile, found
 	// by MAC rather than position. Nil when no pool is configured.
-	reservedAddress *tinkv1.IP
+	reservedAddress *hardwareAddress
 
 	watchManager *tinkcluster.NamespaceWatchManager
 }
@@ -154,7 +155,7 @@ func (e *errRequeueRequested) Error() string {
 	return "requeue requested"
 }
 
-func (scope *machineReconcileScope) ensureTemplateAndWorkflow(hw *tinkv1.Hardware) (*tinkv1.Workflow, error) {
+func (scope *machineReconcileScope) ensureTemplateAndWorkflow(hw *tinkv2.Hardware) (*tinkv1.Workflow, error) {
 	wf, err := scope.getWorkflow()
 
 	switch {
@@ -202,7 +203,7 @@ func (scope *machineReconcileScope) Reconcile() error {
 	return scope.reconcile(hw)
 }
 
-func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nolint:cyclop // this is broken up as best as possible, at the moment.
+func (scope *machineReconcileScope) reconcile(hw *tinkv2.Hardware) error { //nolint:cyclop // this is broken up as best as possible, at the moment.
 	// If the workflow has completed the TinkerbellMachine is ready.
 	if v, found := hw.GetAnnotations()[HardwareProvisionedAnnotation]; found && v == "true" {
 		scope.log.Info("Marking TinkerbellMachine as Ready")
@@ -256,9 +257,9 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv1.Hardware) error { //nol
 	}
 }
 
-func (scope *machineReconcileScope) setStatus(hw *tinkv1.Hardware) error {
+func (scope *machineReconcileScope) setStatus(hw *tinkv2.Hardware) error {
 	if hw == nil {
-		hw = &tinkv1.Hardware{}
+		hw = &tinkv2.Hardware{}
 
 		namespacedName := types.NamespacedName{
 			Name:      scope.tinkerbellMachine.Spec.HardwareName,
@@ -287,10 +288,10 @@ func (scope *machineReconcileScope) setStatus(hw *tinkv1.Hardware) error {
 
 // machineAddress is the address reported for the machine: the IPAM reservation applied this
 // reconcile when there is one (it lives on whichever interface carries the claimed MAC, not
-// necessarily the first), otherwise the first interface's DHCP address as before.
-func (scope *machineReconcileScope) machineAddress(hw *tinkv1.Hardware) (string, error) {
+// necessarily the primary one), otherwise the primary interface's address as before.
+func (scope *machineReconcileScope) machineAddress(hw *tinkv2.Hardware) (string, error) {
 	if scope.reservedAddress != nil {
-		return scope.reservedAddress.Address, nil
+		return scope.reservedAddress.address, nil
 	}
 
 	return hardwareIP(hw)
@@ -314,7 +315,7 @@ func (scope *machineReconcileScope) DeleteMachineWithDependencies() error { //no
 	}
 
 	// Fetch hw for the machine.
-	hw := &tinkv1.Hardware{}
+	hw := &tinkv2.Hardware{}
 
 	err := scope.getHardwareForMachine(hw)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -339,11 +340,11 @@ func (scope *machineReconcileScope) DeleteMachineWithDependencies() error { //no
 		return err
 	}
 
-	// The hardware BMCRef is nil.
+	// The hardware has no BMC.
 	// Remove finalizers and let machine object delete.
-	if hw.Spec.BMCRef == nil {
-		scope.log.Info("Hardware BMC reference not present; skipping hardware power off",
-			"BMCRef", hw.Spec.BMCRef, "Hardware", hw.Name)
+	if !hasBMC(hw) {
+		scope.log.Info("Hardware has no BMC connection or reference; skipping hardware power off",
+			"Hardware", hw.Name)
 
 		if err := scope.releaseHardware(hw); err != nil {
 			return fmt.Errorf("error releasing Hardware: %w", err)

@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 	"github.com/tinkerbell/cluster-api-provider-tinkerbell/controller"
@@ -52,6 +53,7 @@ const (
 	clusterNamespace      = "myClusterNamespace"
 	hardwareIP            = "1.1.1.1"
 	hardwareName          = "myHardwareName"
+	hardwareMAC           = "52:54:00:00:00:01"
 )
 
 func notImplemented(t *testing.T) {
@@ -184,35 +186,31 @@ func validSecret(name, namespace string) *corev1.Secret {
 	}
 }
 
-func validHardware(name, uuid, ip string, options ...testOptions) *tinkv1.Hardware {
-	hw := &tinkv1.Hardware{
+func validHardware(name, uuid, ip string, options ...testOptions) *tinkv2.Hardware {
+	hw := &tinkv2.Hardware{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: clusterNamespace,
 			UID:       types.UID(uuid),
 		},
-		Spec: tinkv1.HardwareSpec{
-			Disks: []tinkv1.Disk{
+		Spec: tinkv2.HardwareSpec{
+			StorageDevices: []tinkv2.StorageDevice{
 				{
-					Device: "/dev/sda",
+					Name: "/dev/sda",
 				},
 			},
-			Interfaces: []tinkv1.Interface{
-				{
-					DHCP: &tinkv1.DHCP{
-						IP: &tinkv1.IP{
+			NetworkInterfaces: tinkv2.NetworkInterfaces{
+				hardwareMAC: {
+					IPAM: &tinkv2.IPAM{
+						IPv4: &tinkv2.IP{
 							Address: ip,
 						},
 					},
-					Netboot: &tinkv1.Netboot{
-						AllowPXE: new(true),
-					},
+					Netboot: &tinkv2.Netboot{},
 				},
 			},
-			Metadata: &tinkv1.HardwareMetadata{
-				Instance: &tinkv1.MetadataInstance{
-					ID: ip,
-				},
+			Instance: &tinkv2.Instance{
+				LookupID: ip,
 			},
 		},
 	}
@@ -308,9 +306,9 @@ func (c *hardwarePatchConflictClient) Patch(
 	patch client.Patch,
 	opts ...client.PatchOption,
 ) error {
-	if _, ok := obj.(*tinkv1.Hardware); ok {
+	if _, ok := obj.(*tinkv2.Hardware); ok {
 		return apierrors.NewConflict(
-			schema.GroupResource{Group: tinkv1.GroupVersion.Group, Resource: "hardware"},
+			schema.GroupResource{Group: tinkv2.GroupVersion.Group, Resource: "hardware"},
 			obj.GetName(),
 			fmt.Errorf("forced Hardware claim conflict"),
 		)
@@ -448,7 +446,7 @@ func Test_Machine_reconciliation_with_available_hardware(t *testing.T) {
 			Namespace: clusterNamespace,
 		}
 
-		updatedHardware := &tinkv1.Hardware{}
+		updatedHardware := &tinkv2.Hardware{}
 		g.Expect(client.Get(ctx, hardwareNamespacedName, updatedHardware)).To(Succeed())
 
 		g.Expect(updatedHardware.ObjectMeta.Labels).To(
@@ -486,7 +484,7 @@ func Test_Machine_reconciliation_with_available_hardware(t *testing.T) {
 		g.Expect(updatedMachine.Status.Addresses).NotTo(BeEmpty(), "Machine status should be updated on every reconciliation")
 	})
 
-	t.Run("allowPXE_is_not_updated", func(t *testing.T) {
+	t.Run("netboot_is_not_updated", func(t *testing.T) {
 		t.Parallel()
 		g := NewWithT(t)
 
@@ -495,10 +493,10 @@ func Test_Machine_reconciliation_with_available_hardware(t *testing.T) {
 			Namespace: clusterNamespace,
 		}
 
-		updatedHardware := &tinkv1.Hardware{}
+		updatedHardware := &tinkv2.Hardware{}
 		g.Expect(client.Get(ctx, hardwareNamespacedName, updatedHardware)).To(Succeed())
 
-		if diff := cmp.Diff(updatedHardware.Spec.Interfaces[0].Netboot.AllowPXE, new(true)); diff != "" {
+		if diff := cmp.Diff(updatedHardware.Spec.NetworkInterfaces[hardwareMAC].Netboot, &tinkv2.Netboot{}); diff != "" {
 			t.Error(diff)
 		}
 	})
@@ -533,13 +531,13 @@ func Test_Machine_reconciliation_does_not_rewrite_already_claimed_hardware(t *te
 		Namespace: clusterNamespace,
 	}
 
-	claimedHardware := &tinkv1.Hardware{}
+	claimedHardware := &tinkv2.Hardware{}
 	g.Expect(client.Get(ctx, hardwareNamespacedName, claimedHardware)).To(Succeed())
 
 	_, err = reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
 	g.Expect(err).NotTo(HaveOccurred(), "Unexpected reconciliation error")
 
-	reclaimedHardware := &tinkv1.Hardware{}
+	reclaimedHardware := &tinkv2.Hardware{}
 	g.Expect(client.Get(ctx, hardwareNamespacedName, reclaimedHardware)).To(Succeed())
 
 	g.Expect(reclaimedHardware.ResourceVersion).To(Equal(claimedHardware.ResourceVersion),
@@ -572,7 +570,7 @@ func Test_Machine_reconciliation_quietly_requeues_hardware_claim_conflict(t *tes
 	g.Expect(err).NotTo(HaveOccurred(), "Expected Hardware claim conflict to requeue without an error")
 	g.Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Expected an explicit delayed requeue")
 
-	persisted := &tinkv1.Hardware{}
+	persisted := &tinkv2.Hardware{}
 	g.Expect(managementClient.Get(
 		context.Background(),
 		types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace},
@@ -663,7 +661,7 @@ func Test_Machine_reconciliation_workflow_complete(t *testing.T) {
 			Namespace: clusterNamespace,
 		}
 
-		updatedHardware := &tinkv1.Hardware{}
+		updatedHardware := &tinkv2.Hardware{}
 		g.Expect(client.Get(ctx, hardwareNamespacedName, updatedHardware)).To(Succeed())
 
 		g.Expect(updatedHardware.ObjectMeta.Labels).To(
@@ -813,9 +811,9 @@ func Test_Machine_reconciliation_when_machine_is_scheduled_for_removal_it(t *tes
 	updatedMachine := &infrastructurev1.TinkerbellMachine{}
 	g.Expect(client.Get(ctx, tinkerbellMachineNamespacedName, updatedMachine)).To(Succeed())
 
-	claimedHardware := &tinkv1.Hardware{}
+	claimedHardware := &tinkv2.Hardware{}
 	g.Expect(client.Get(ctx, types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace}, claimedHardware)).To(Succeed())
-	g.Expect(claimedHardware.Spec.UserData).NotTo(BeNil(),
+	g.Expect(claimedHardware.Spec.Instance.Userdata).NotTo(BeNil(),
 		"claiming the hardware should have written user data; without it the release assertions below are vacuous")
 
 	g.Expect(client.Delete(ctx, updatedMachine)).To(Succeed())
@@ -827,7 +825,7 @@ func Test_Machine_reconciliation_when_machine_is_scheduled_for_removal_it(t *tes
 		Namespace: clusterNamespace,
 	}
 
-	updatedHardware := &tinkv1.Hardware{}
+	updatedHardware := &tinkv2.Hardware{}
 	g.Expect(client.Get(ctx, hardwareNamespacedName, updatedHardware)).To(Succeed())
 
 	t.Run("removes_tinkerbell_machine_finalizer_from_hardware", func(t *testing.T) {
@@ -851,8 +849,8 @@ func Test_Machine_reconciliation_when_machine_is_scheduled_for_removal_it(t *tes
 		t.Parallel()
 		g := NewWithT(t)
 
-		g.Expect(updatedHardware.Spec.UserData).To(BeNil(),
-			"released hardware must not keep the machine configuration; hegel would serve it to the next netboot")
+		g.Expect(updatedHardware.Spec.Instance.Userdata).To(BeNil(),
+			"released hardware must not keep the machine configuration; Tootles would serve it to the next netboot")
 	})
 }
 
@@ -2139,7 +2137,7 @@ func Test_Machine_reconciliation_with_ipam_pool(t *testing.T) {
 
 	// The Hardware knows its MAC but has no address: IPAM must supply it.
 	hardware := validHardware(hardwareName, hardwareUUID, "")
-	hardware.Spec.Interfaces[0].DHCP = &tinkv1.DHCP{MAC: mac}
+	hardware.Spec.NetworkInterfaces = tinkv2.NetworkInterfaces{mac: {}}
 
 	objects := []runtime.Object{
 		tinkerbellMachine,
@@ -2192,9 +2190,9 @@ func Test_Machine_reconciliation_with_ipam_pool(t *testing.T) {
 		t.Parallel()
 		g := NewWithT(t)
 
-		updatedHardware := &tinkv1.Hardware{}
+		updatedHardware := &tinkv2.Hardware{}
 		g.Expect(client.Get(ctx, types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace}, updatedHardware)).To(Succeed())
-		g.Expect(updatedHardware.Spec.Interfaces[0].DHCP.IP).To(Equal(&tinkv1.IP{Address: address, Netmask: "255.255.255.0", Gateway: "10.1.40.1", Family: 4}))
+		g.Expect(updatedHardware.Spec.NetworkInterfaces[mac].IPAM).To(Equal(&tinkv2.IPAM{IPv4: &tinkv2.IP{Address: address, Prefix: "24", Gateway: "10.1.40.1"}}))
 	})
 
 	t.Run("reports_the_address_and_condition", func(t *testing.T) {
@@ -2231,7 +2229,7 @@ func Test_Machine_reconciliation_releases_the_ipam_claim_on_removal(t *testing.T
 	tinkerbellMachine.Spec.AddressFromPool = &ipamv1.IPPoolReference{APIGroup: "ipam.cluster.x-k8s.io", Kind: "InClusterIPPool", Name: poolName}
 
 	hardware := validHardware(hardwareName, hardwareUUID, "")
-	hardware.Spec.Interfaces[0].DHCP = &tinkv1.DHCP{MAC: mac}
+	hardware.Spec.NetworkInterfaces = tinkv2.NetworkInterfaces{mac: {}}
 
 	objects := []runtime.Object{
 		tinkerbellMachine,
@@ -2268,9 +2266,9 @@ func Test_Machine_reconciliation_releases_the_ipam_claim_on_removal(t *testing.T
 	_, err = reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
 	g.Expect(err).NotTo(HaveOccurred())
 
-	reserved := &tinkv1.Hardware{}
+	reserved := &tinkv2.Hardware{}
 	g.Expect(client.Get(ctx, types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace}, reserved)).To(Succeed())
-	g.Expect(reserved.Spec.Interfaces[0].DHCP.IP).NotTo(BeNil(), "precondition: the address was reserved")
+	g.Expect(reserved.Spec.NetworkInterfaces[mac].IPAM).NotTo(BeNil(), "precondition: the address was reserved")
 
 	updatedMachine := &infrastructurev1.TinkerbellMachine{}
 	g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, updatedMachine)).To(Succeed())
@@ -2291,9 +2289,9 @@ func Test_Machine_reconciliation_releases_the_ipam_claim_on_removal(t *testing.T
 		t.Parallel()
 		g := NewWithT(t)
 
-		released := &tinkv1.Hardware{}
+		released := &tinkv2.Hardware{}
 		g.Expect(client.Get(ctx, types.NamespacedName{Name: hardwareName, Namespace: clusterNamespace}, released)).To(Succeed())
-		g.Expect(released.Spec.Interfaces[0].DHCP.IP).To(BeNil())
-		g.Expect(released.Spec.Interfaces[0].DHCP.MAC).To(Equal(mac), "only the reservation is cleared, not the interface")
+		g.Expect(released.Spec.NetworkInterfaces).To(HaveKey(tinkv2.MAC(mac)), "only the reservation is cleared, not the interface")
+		g.Expect(released.Spec.NetworkInterfaces[mac].IPAM).To(BeNil())
 	})
 }

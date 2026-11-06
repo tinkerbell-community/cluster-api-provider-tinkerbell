@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	rufiov1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/bmc"
-	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
+	rufiov2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell/bmc"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -40,7 +40,7 @@ const (
 // because it manages the machine's BMC through Rufio. One hard power cycle is attempted; if
 // that does not bring the node back the update is left failed for an operator to inspect,
 // which is the honest outcome rather than an endless reboot loop.
-func (scope *machineReconcileScope) reconcileInPlaceRecovery(hw *tinkv1.Hardware, timeout time.Duration) error {
+func (scope *machineReconcileScope) reconcileInPlaceRecovery(hw *tinkv2.Hardware, timeout time.Duration) error {
 	machine, err := scope.getOwningMachine()
 	if err != nil || machine == nil {
 		return err
@@ -63,8 +63,8 @@ func (scope *machineReconcileScope) reconcileInPlaceRecovery(hw *tinkv1.Hardware
 		return nil
 	}
 
-	if hw == nil || hw.Spec.BMCRef == nil {
-		scope.log.Info("in-place update appears stalled but the hardware has no BMC reference, cannot recover",
+	if !hasBMC(hw) {
+		scope.log.Info("in-place update appears stalled but the hardware has no BMC, cannot recover",
 			"machine", machine.Name)
 
 		return nil
@@ -111,23 +111,11 @@ func inPlaceUpdateStartedAt(machine *clusterv1.Machine) time.Time {
 }
 
 // createPowerCycleJob issues a hard power cycle through Rufio.
-func (scope *machineReconcileScope) createPowerCycleJob(hw *tinkv1.Hardware) error {
-	job := &rufiov1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-inplace-recovery", scope.tinkerbellMachine.Name),
-			Namespace: scope.tinkerbellNamespace(),
-		},
-		Spec: rufiov1.JobSpec{
-			MachineRef: rufiov1.MachineRef{
-				Name:      hw.Spec.BMCRef.Name,
-				Namespace: scope.tinkerbellNamespace(),
-			},
-			Tasks: []rufiov1.Action{
-				{PowerAction: new(rufiov1.PowerHardOff)},
-				{PowerAction: new(rufiov1.PowerOn)},
-			},
-		},
-	}
+func (scope *machineReconcileScope) createPowerCycleJob(hw *tinkv2.Hardware) error {
+	job := scope.newBMCJob(fmt.Sprintf("%s-inplace-recovery", scope.tinkerbellMachine.Name), hw,
+		powerAction(rufiov2.PowerActionHardOff),
+		powerAction(rufiov2.PowerActionOn),
+	)
 
 	if err := scope.setResourceOwnership(job); err != nil {
 		return fmt.Errorf("setting BMCJob ownership: %w", err)

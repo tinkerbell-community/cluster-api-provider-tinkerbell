@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -67,8 +68,8 @@ func (scope *machineReconcileScope) clusterTemplate() (string, error) {
 	return "", nil
 }
 
-func (scope *machineReconcileScope) createTemplate(hw *tinkv1.Hardware) error {
-	if len(hw.Spec.Disks) < 1 {
+func (scope *machineReconcileScope) createTemplate(hw *tinkv2.Hardware) error {
+	if len(hw.Spec.StorageDevices) < 1 {
 		return ErrHardwareMissingDiskConfiguration
 	}
 
@@ -104,7 +105,7 @@ func (scope *machineReconcileScope) createTemplate(hw *tinkv1.Hardware) error {
 
 // resolveTemplateData resolves the workflow template data by checking, in order:
 // machine-level inline, machine-level ref, hardware annotation, cluster-level template.
-func (scope *machineReconcileScope) resolveTemplateData(hw *tinkv1.Hardware) (string, error) {
+func (scope *machineReconcileScope) resolveTemplateData(hw *tinkv2.Hardware) (string, error) {
 	if data := scope.tinkerbellMachine.Spec.TemplateInline; data != "" {
 		return data, nil
 	}
@@ -124,7 +125,7 @@ func (scope *machineReconcileScope) resolveTemplateData(hw *tinkv1.Hardware) (st
 	return scope.clusterTemplate()
 }
 
-func (scope *machineReconcileScope) templateFromAnnotation(hw *tinkv1.Hardware) (string, error) {
+func (scope *machineReconcileScope) templateFromAnnotation(hw *tinkv2.Hardware) (string, error) {
 	// Check if hardware has an annotation 'hardware.tinkerbell.org/capt-template-override', if so,
 	// use it as the name of a Template resource in the same namespace as the Hardware, load it,
 	// and use its spec.data as the template.
@@ -146,7 +147,7 @@ func (scope *machineReconcileScope) templateFromAnnotation(hw *tinkv1.Hardware) 
 	return data, nil
 }
 
-func (scope *machineReconcileScope) ensureTemplate(hardware *tinkv1.Hardware) error {
+func (scope *machineReconcileScope) ensureTemplate(hardware *tinkv2.Hardware) error {
 	// TODO: should this reconccile the template instead of just ensuring it exists?
 	templateExists, err := scope.templateExists()
 	if err != nil {

@@ -39,8 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	rufiov1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/bmc"
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	rufiov2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell/bmc"
 	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
@@ -280,7 +280,7 @@ func (r *TinkerbellMachineReconciler) SetupWithManager(ctx context.Context, mgr 
 				),
 			).
 			Watches(
-				&rufiov1.Job{},
+				&rufiov2.Job{},
 				handler.EnqueueRequestForOwner(
 					mgr.GetScheme(),
 					mgr.GetRESTMapper(),
@@ -293,7 +293,7 @@ func (r *TinkerbellMachineReconciler) SetupWithManager(ctx context.Context, mgr 
 				handler.EnqueueRequestsFromMapFunc(labelToMachineMapper),
 			).
 			Watches(
-				&rufiov1.Job{},
+				&rufiov2.Job{},
 				handler.EnqueueRequestsFromMapFunc(labelToMachineMapper),
 			)
 	}

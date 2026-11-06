@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	rufiov1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/bmc"
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	rufiov2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell/bmc"
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -215,7 +215,7 @@ func (m *NamespaceWatchManager) startAndRegister(
 		Scheme: m.scheme,
 		ByObject: map[client.Object]cache.ByObject{
 			&tinkv1.Workflow{}: {},
-			&rufiov1.Job{}:     {},
+			&rufiov2.Job{}:     {},
 		},
 		DefaultNamespaces: map[string]cache.Config{
 			namespace: {},
@@ -254,8 +254,8 @@ func (m *NamespaceWatchManager) startAndRegister(
 		return nil, fmt.Errorf("watching Workflows in namespace %q: %w", namespace, err)
 	}
 
-	if err := ctrl.Watch(source.Kind(nsCache, &rufiov1.Job{},
-		handler.TypedEnqueueRequestsFromMapFunc(labelMapper[*rufiov1.Job](m.labelMachineName, m.labelMachineNamespace)))); err != nil {
+	if err := ctrl.Watch(source.Kind(nsCache, &rufiov2.Job{},
+		handler.TypedEnqueueRequestsFromMapFunc(labelMapper[*rufiov2.Job](m.labelMachineName, m.labelMachineNamespace)))); err != nil {
 		cacheCancel()
 		return nil, fmt.Errorf("watching Jobs in namespace %q: %w", namespace, err)
 	}

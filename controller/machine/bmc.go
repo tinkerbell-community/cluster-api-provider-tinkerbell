@@ -3,32 +3,43 @@ package machine
 import (
 	"fmt"
 
-	rufiov1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/bmc"
-	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
+	rufiov2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell/bmc"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// createPowerOffJob creates a BMCJob object with the required tasks for hardware power off.
-func (scope *machineReconcileScope) createPowerOffJob(hw *tinkv1.Hardware) error {
-	bmcJob := &rufiov1.Job{
+// newBMCJob returns a bmc Job named name that runs operations against hw's BMC, in order.
+//
+// The Job references the Hardware rather than carrying a connection: Rufio resolves the BMC
+// from it, whether the Hardware has its own spec.bmc.connection or, for Hardware created
+// through v1alpha1, a bmcRef to a deprecated bmc Machine (see hasBMC).
+func (scope *machineReconcileScope) newBMCJob(name string, hw *tinkv2.Hardware, operations ...rufiov2.Operations) *rufiov2.Job {
+	return &rufiov2.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-poweroff", scope.tinkerbellMachine.Name),
+			Name:      name,
 			Namespace: scope.tinkerbellNamespace(),
 		},
-		Spec: rufiov1.JobSpec{
-			MachineRef: rufiov1.MachineRef{
-				Name:      hw.Spec.BMCRef.Name,
-				Namespace: scope.tinkerbellNamespace(),
+		Spec: rufiov2.JobSpec{
+			HardwareRef: &rufiov2.SimpleReference{
+				Name:      hw.Name,
+				Namespace: hw.Namespace,
 			},
-			Tasks: []rufiov1.Action{
-				{
-					PowerAction: new(rufiov1.PowerHardOff),
-				},
-			},
+			Operations: operations,
 		},
 	}
+}
+
+// powerAction returns the bmc operation that runs action.
+func powerAction(action rufiov2.PowerAction) rufiov2.Operations {
+	return rufiov2.Operations{PowerAction: &action}
+}
+
+// createPowerOffJob creates a BMCJob object with the required tasks for hardware power off.
+func (scope *machineReconcileScope) createPowerOffJob(hw *tinkv2.Hardware) error {
+	bmcJob := scope.newBMCJob(fmt.Sprintf("%s-poweroff", scope.tinkerbellMachine.Name), hw,
+		powerAction(rufiov2.PowerActionHardOff))
 
 	if err := scope.setResourceOwnership(bmcJob); err != nil {
 		return fmt.Errorf("setting BMCJob ownership: %w", err)
@@ -46,7 +57,7 @@ func (scope *machineReconcileScope) createPowerOffJob(hw *tinkv1.Hardware) error
 }
 
 // getJob fetches the Job by name.
-func (scope *machineReconcileScope) getJob(name string, job *rufiov1.Job) error {
+func (scope *machineReconcileScope) getJob(name string, job *rufiov2.Job) error {
 	namespacedName := types.NamespacedName{
 		Name:      name,
 		Namespace: scope.tinkerbellNamespace(),
@@ -61,10 +72,10 @@ func (scope *machineReconcileScope) getJob(name string, job *rufiov1.Job) error 
 
 // ensureBMCJobCompletionForDelete ensures the machine power off BMCJob is completed.
 // Removes the machint finalizer to let machine delete.
-func (scope *machineReconcileScope) ensureBMCJobCompletionForDelete(hardware *tinkv1.Hardware) error {
+func (scope *machineReconcileScope) ensureBMCJobCompletionForDelete(hardware *tinkv2.Hardware) error {
 	// Fetch a poweroff BMCJob for the machine.
 	// If Job not found, we remove dependencies and create job.
-	bmcJob := &rufiov1.Job{}
+	bmcJob := &rufiov2.Job{}
 	jobName := fmt.Sprintf("%s-poweroff", scope.tinkerbellMachine.Name)
 
 	if err := scope.getJob(jobName, bmcJob); err != nil {
@@ -76,11 +87,11 @@ func (scope *machineReconcileScope) ensureBMCJobCompletionForDelete(hardware *ti
 	}
 
 	// Check the Job conditions to ensure the power off job is complete.
-	if bmcJob.HasCondition(rufiov1.JobCompleted, rufiov1.ConditionTrue) {
+	if rufiov2.HasConditionStatus(bmcJob.Status.Conditions, rufiov2.ConditionTypeCompleted, rufiov2.ConditionStatusTrue) {
 		return nil
 	}
 
-	if bmcJob.HasCondition(rufiov1.JobFailed, rufiov1.ConditionTrue) {
+	if rufiov2.HasConditionStatus(bmcJob.Status.Conditions, rufiov2.ConditionTypeFailed, rufiov2.ConditionStatusTrue) {
 		return fmt.Errorf("bmc job %s/%s failed", bmcJob.Namespace, bmcJob.Name)
 	}
 
