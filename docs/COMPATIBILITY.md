@@ -9,8 +9,20 @@ CAPT requires Tinkerbell from [tinkerbell-community](https://github.com/tinkerbe
 **v0.27.0 or later**. It reads and writes Hardware, Workflows, Tasks and bmc Jobs as
 `tinkerbell.org/v1alpha2` and `bmc.tinkerbell.org/v1alpha2`, which Tinkerbell stores from v0.27.0 on.
 Earlier CAPT releases use the deprecated `v1alpha1` kinds; Tinkerbell v0.27 still serves those
-through its conversion webhook, so upgrade Tinkerbell first, then CAPT. CAPT builds against the
-fork's API module (`github.com/tinkerbell-community/tinkerbell/api` v0.27.1, replacing
+through its conversion webhook, so upgrade Tinkerbell first, then CAPT.
+
+Tinkerbell v0.28.0 stores Workflow states by name (`Pending`, ...) instead of as numbers. CAPT
+v0.9.0 cannot read those; CAPT v0.9.1 reads both. With Tinkerbell v0.28.0 or later, use CAPT
+v0.9.1 or later, and upgrade CAPT first.
+
+| CAPT | Tinkerbell (tinkerbell-community) |
+| ---- | --------------------------------- |
+| v0.9.1 | v0.27.0 or later |
+| v0.9.0 | v0.27.x |
+| v0.8.x and earlier | any release that serves `v1alpha1` (v0.27 and v0.28 do) |
+
+CAPT builds against the
+fork's API module (`github.com/tinkerbell-community/tinkerbell/api` v0.28.0, replacing
 `github.com/tinkerbell/tinkerbell/api`) and uses its `conversion` package, so it maps the two
 versions exactly as Tinkerbell's conversion webhook does.
 
