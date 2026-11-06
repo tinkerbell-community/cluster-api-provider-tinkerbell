@@ -6,9 +6,11 @@ import (
 
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -68,29 +70,43 @@ func (scope *machineReconcileScope) clusterTemplate() (string, error) {
 	return "", nil
 }
 
-func (scope *machineReconcileScope) createTemplate(hw *tinkv2.Hardware) error {
+// templateData returns the data of the machine's template, which Hardware without storage
+// devices cannot be provisioned with.
+func (scope *machineReconcileScope) templateData(hw *tinkv2.Hardware) (string, error) {
 	if len(hw.Spec.StorageDevices) < 1 {
-		return ErrHardwareMissingDiskConfiguration
+		return "", ErrHardwareMissingDiskConfiguration
 	}
 
 	templateData, err := scope.resolveTemplateData(hw)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if templateData == "" {
-		return ErrNoTemplateFound
+		return "", ErrNoTemplateFound
 	}
 
-	templateObject := &tinkv1.Template{
+	return templateData, nil
+}
+
+// templateObject returns the machine's v1alpha1 Template with data: named after the machine, in
+// the Tinkerbell namespace. Its Tasks (conversion.TemplateTasks) are named after it.
+func (scope *machineReconcileScope) templateObject(data string) *tinkv1.Template {
+	return &tinkv1.Template{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      scope.tinkerbellMachine.Name,
 			Namespace: scope.tinkerbellNamespace(),
 		},
 		Spec: tinkv1.TemplateSpec{
-			Data: &templateData,
+			Data: &data,
 		},
 	}
+}
+
+// createTemplate creates the machine's v1alpha1 Template with data, for a Workflow that runs it in
+// v1alpha1 compatibility mode.
+func (scope *machineReconcileScope) createTemplate(data string) error {
+	templateObject := scope.templateObject(data)
 
 	if err := scope.setResourceOwnership(templateObject); err != nil {
 		return fmt.Errorf("setting template ownership: %w", err)
@@ -98,6 +114,105 @@ func (scope *machineReconcileScope) createTemplate(hw *tinkv2.Hardware) error {
 
 	if err := scope.tinkerbellClient.Create(scope.ctx, templateObject); err != nil {
 		return fmt.Errorf("creating Tinkerbell template: %w", err)
+	}
+
+	return nil
+}
+
+// ownsResource reports whether obj carries this machine's ownership labels (see
+// setResourceOwnership), which CAPT sets on every Tinkerbell object it creates for a machine.
+func (scope *machineReconcileScope) ownsResource(obj client.Object) bool {
+	labels := obj.GetLabels()
+
+	return labels[LabelMachineName] == scope.tinkerbellMachine.Name &&
+		labels[LabelMachineNamespace] == scope.tinkerbellMachine.Namespace
+}
+
+// taskConflict returns why the machine cannot use tasks: a Task of one of their names exists that
+// is not the machine's, such as one Tinkerbell translated from a Template of the same name.
+func (scope *machineReconcileScope) taskConflict(tasks []tinkv2.Task) (string, error) {
+	for i := range tasks {
+		key := client.ObjectKeyFromObject(&tasks[i])
+		existing := &tinkv2.Task{}
+
+		err := scope.tinkerbellClient.Get(scope.ctx, key, existing)
+
+		switch {
+		case apierrors.IsNotFound(err):
+			continue
+		case err != nil:
+			return "", fmt.Errorf("getting Task %s: %w", key, err)
+		case !scope.ownsResource(existing):
+			return fmt.Sprintf("Task %s already exists and does not belong to this machine", key), nil
+		}
+	}
+
+	return "", nil
+}
+
+// ensureTasks makes the machine's Tasks those given: it creates them, updates the ones it already
+// has to match (an earlier attempt may have left them), and deletes any other Task of the machine.
+func (scope *machineReconcileScope) ensureTasks(tasks []tinkv2.Task) error {
+	keep := make(map[string]bool, len(tasks))
+
+	for i := range tasks {
+		task := &tasks[i]
+		keep[task.Name] = true
+
+		existing := &tinkv2.Task{}
+
+		err := scope.tinkerbellClient.Get(scope.ctx, client.ObjectKeyFromObject(task), existing)
+
+		switch {
+		case apierrors.IsNotFound(err):
+			if err := scope.tinkerbellClient.Create(scope.ctx, task); err != nil {
+				return fmt.Errorf("creating Task %s/%s: %w", task.Namespace, task.Name, err)
+			}
+
+			continue
+		case err != nil:
+			return fmt.Errorf("getting Task %s/%s: %w", task.Namespace, task.Name, err)
+		case equality.Semantic.DeepEqual(existing.Spec, task.Spec) &&
+			equality.Semantic.DeepEqual(existing.Annotations, task.Annotations):
+			continue
+		}
+
+		existing.Spec = task.Spec
+		existing.Annotations = task.Annotations
+
+		if err := scope.tinkerbellClient.Update(scope.ctx, existing); err != nil {
+			return fmt.Errorf("updating Task %s/%s: %w", task.Namespace, task.Name, err)
+		}
+	}
+
+	return scope.removeTasks(keep)
+}
+
+// removeTasks deletes the machine's Tasks, except those named in keep.
+func (scope *machineReconcileScope) removeTasks(keep map[string]bool) error {
+	tasks := &tinkv2.TaskList{}
+
+	if err := scope.tinkerbellClient.List(scope.ctx, tasks,
+		client.InNamespace(scope.tinkerbellNamespace()),
+		client.MatchingLabels{
+			LabelMachineName:      scope.tinkerbellMachine.Name,
+			LabelMachineNamespace: scope.tinkerbellMachine.Namespace,
+		},
+	); err != nil {
+		return fmt.Errorf("listing Tasks of the machine: %w", err)
+	}
+
+	for i := range tasks.Items {
+		task := &tasks.Items[i]
+		if keep[task.Name] {
+			continue
+		}
+
+		scope.log.Info("Removing Task", "name", client.ObjectKeyFromObject(task))
+
+		if err := scope.tinkerbellClient.Delete(scope.ctx, task); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("removing Task %s/%s: %w", task.Namespace, task.Name, err)
+		}
 	}
 
 	return nil
@@ -147,23 +262,8 @@ func (scope *machineReconcileScope) templateFromAnnotation(hw *tinkv2.Hardware) 
 	return data, nil
 }
 
-func (scope *machineReconcileScope) ensureTemplate(hardware *tinkv2.Hardware) error {
-	// TODO: should this reconccile the template instead of just ensuring it exists?
-	templateExists, err := scope.templateExists()
-	if err != nil {
-		return fmt.Errorf("checking if Template exists: %w", err)
-	}
-
-	if templateExists {
-		return nil
-	}
-
-	scope.log.Info("template for machine does not exist, creating")
-
-	return scope.createTemplate(hardware)
-}
-
-// removeTemplate makes sure template for TinkerbellMachine has been cleaned up.
+// removeTemplate makes sure template for TinkerbellMachine has been cleaned up. CAPT creates it
+// for Workflows in v1alpha1 compatibility mode; CAPT before v1alpha2 created it for every machine.
 func (scope *machineReconcileScope) removeTemplate() error {
 	namespacedName := types.NamespacedName{
 		Name:      scope.tinkerbellMachine.Name,

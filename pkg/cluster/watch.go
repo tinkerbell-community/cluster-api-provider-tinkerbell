@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	rufiov2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell/bmc"
 	"golang.org/x/sync/singleflight"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -40,7 +40,7 @@ type failureRecord struct {
 
 // NamespaceWatchManager dynamically creates per-namespace informer caches and
 // registers watch sources on a controller. This is used when the external
-// kubeconfig does not have cluster-wide list/watch access for Workflows and Jobs.
+// kubeconfig does not have cluster-wide list/watch access for Workflows, Tasks and Jobs.
 type NamespaceWatchManager struct {
 	mu         sync.Mutex
 	restConfig *rest.Config
@@ -99,7 +99,7 @@ func (m *NamespaceWatchManager) SetContext(ctx context.Context) {
 }
 
 // EnsureWatch ensures that a namespace-scoped informer cache is running for the
-// given namespace and that Workflow and Job watches are registered on the
+// given namespace and that Workflow, Task and Job watches are registered on the
 // controller. Calls for already-watched namespaces are no-ops.
 // Concurrent callers for the same namespace block until the first caller
 // completes; all receive the same result.
@@ -203,7 +203,7 @@ func backoffDuration(failureCount int) time.Duration {
 }
 
 // startAndRegister creates a namespace-scoped cache, starts it, waits for sync,
-// and registers Workflow/Job watches on the controller. It returns a CancelFunc
+// and registers Workflow/Task/Job watches on the controller. It returns a CancelFunc
 // to stop the cache. All operations are safe to call without holding m.mu.
 func (m *NamespaceWatchManager) startAndRegister(
 	ctx context.Context,
@@ -214,7 +214,8 @@ func (m *NamespaceWatchManager) startAndRegister(
 	nsCache, err := cache.New(m.restConfig, cache.Options{
 		Scheme: m.scheme,
 		ByObject: map[client.Object]cache.ByObject{
-			&tinkv1.Workflow{}: {},
+			&tinkv2.Workflow{}: {},
+			&tinkv2.Task{}:     {},
 			&rufiov2.Job{}:     {},
 		},
 		DefaultNamespaces: map[string]cache.Config{
@@ -248,10 +249,16 @@ func (m *NamespaceWatchManager) startAndRegister(
 	}
 
 	// Register watches on the controller for this namespace's cache.
-	if err := ctrl.Watch(source.Kind(nsCache, &tinkv1.Workflow{},
-		handler.TypedEnqueueRequestsFromMapFunc(labelMapper[*tinkv1.Workflow](m.labelMachineName, m.labelMachineNamespace)))); err != nil {
+	if err := ctrl.Watch(source.Kind(nsCache, &tinkv2.Workflow{},
+		handler.TypedEnqueueRequestsFromMapFunc(labelMapper[*tinkv2.Workflow](m.labelMachineName, m.labelMachineNamespace)))); err != nil {
 		cacheCancel()
 		return nil, fmt.Errorf("watching Workflows in namespace %q: %w", namespace, err)
+	}
+
+	if err := ctrl.Watch(source.Kind(nsCache, &tinkv2.Task{},
+		handler.TypedEnqueueRequestsFromMapFunc(labelMapper[*tinkv2.Task](m.labelMachineName, m.labelMachineNamespace)))); err != nil {
+		cacheCancel()
+		return nil, fmt.Errorf("watching Tasks in namespace %q: %w", namespace, err)
 	}
 
 	if err := ctrl.Watch(source.Kind(nsCache, &rufiov2.Job{},

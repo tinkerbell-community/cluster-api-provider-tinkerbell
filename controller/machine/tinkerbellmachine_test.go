@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/tinkerbell/tinkerbell/api/conversion"
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 
@@ -255,30 +256,56 @@ tasks:
 	}
 }
 
-func validWorkflow(name, namespace string) *tinkv1.Workflow {
-	return &tinkv1.Workflow{
+func validWorkflow(name, namespace string) *tinkv2.Workflow {
+	return &tinkv2.Workflow{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
+			Name:        name,
+			Namespace:   namespace,
+			Annotations: map[string]string{conversion.AnnotationTemplate: name},
 		},
-		Spec: tinkv1.WorkflowSpec{
-			TemplateRef: name,
-		},
-		Status: tinkv1.WorkflowStatus{
-			State: tinkv1.WorkflowStateSuccess,
-			Tasks: []tinkv1.Task{
+		Status: tinkv2.WorkflowStatus{
+			Metadata: tinkv2.WorkflowMetadata{
+				Workflow: tinkv2.Metadata{State: tinkv2.StateSuccess},
+			},
+			RenderedTasks: []tinkv2.TaskWithMetadata{
 				{
 					Name: name,
-					Actions: []tinkv1.Action{
+					Actions: []tinkv2.ActionWithMetadata{
 						{
-							Name:  name,
-							State: tinkv1.WorkflowStateSuccess,
+							Action:   tinkv2.Action{Name: name},
+							Metadata: tinkv2.Metadata{State: tinkv2.StateSuccess},
 						},
 					},
 				},
 			},
 		},
 	}
+}
+
+// expectNativeWorkflow asserts that CAPT created the machine's Workflow to run, natively, the
+// v1alpha2 Tasks data converts to, and no v1alpha1 Template.
+func expectNativeWorkflow(g Gomega, cl client.Client, data string) {
+	ctx := context.Background()
+	key := types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}
+
+	conv, err := conversion.ConvertTemplate(data, nil)
+	g.Expect(err).NotTo(HaveOccurred(), "the test template must convert")
+
+	tpl := &tinkv1.Template{ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace}}
+	want := conversion.TemplateTasks(tpl, conv)
+
+	workflow := &tinkv2.Workflow{}
+	g.Expect(cl.Get(ctx, key, workflow)).To(Succeed(), "Expected workflow to be created")
+	g.Expect(workflow.Spec.Tasks).To(HaveLen(len(want)))
+
+	for i := range want {
+		task := &tinkv2.Task{}
+		g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(&want[i]), task)).To(Succeed(), "Expected Task %s to be created", want[i].Name)
+		g.Expect(task.Spec).To(Equal(want[i].Spec), "Task %s, diff: %s", task.Name, cmp.Diff(want[i].Spec, task.Spec))
+		g.Expect(workflow.Spec.Tasks[i].TaskRef).To(Equal(tinkv2.SimpleReference{Name: task.Name, Namespace: task.Namespace}))
+	}
+
+	g.Expect(apierrors.IsNotFound(cl.Get(ctx, key, &tinkv1.Template{}))).To(BeTrue(), "Expected no Template for a template that converts")
 }
 
 func kubernetesClientWithObjects(t *testing.T, objects []runtime.Object) client.Client {
@@ -360,22 +387,26 @@ func Test_Machine_reconciliation_with_available_hardware(t *testing.T) {
 		Namespace: clusterNamespace,
 	}
 
-	t.Run("creates_template", func(t *testing.T) {
+	// The cluster's template converts to v1alpha2, so the Workflow runs its Tasks natively and
+	// there is no v1alpha1 Template.
+	t.Run("creates_tasks", func(t *testing.T) {
 		t.Parallel()
 		g := NewWithT(t)
 
-		template := &tinkv1.Template{}
+		expectNativeWorkflow(g, client, validTinkerbellCluster(clusterName, clusterNamespace).Spec.TemplateInline)
 
-		g.Expect(client.Get(ctx, globalResourceName, template)).To(Succeed(), "Expected template to be created")
+		task := &tinkv2.Task{}
+		g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName + "-test", Namespace: clusterNamespace}, task)).
+			To(Succeed(), "Expected the template task to be created as <machine>-<task>")
 
 		// Owner reference is required to make use of Kubernetes GC for removing dependent objects, so if
-		// machine gets force-removed, template will be cleaned up.
+		// machine gets force-removed, the tasks will be cleaned up.
 		t.Run("with_owner_reference_set", func(t *testing.T) { //nolint:paralleltest
 			g := NewWithT(t)
 
-			g.Expect(template.ObjectMeta.OwnerReferences).NotTo(BeEmpty(), "Expected at least one owner reference to be set")
+			g.Expect(task.ObjectMeta.OwnerReferences).NotTo(BeEmpty(), "Expected at least one owner reference to be set")
 
-			g.Expect(template.ObjectMeta.OwnerReferences[0].UID).To(BeEquivalentTo(types.UID(hardwareUUID)),
+			g.Expect(task.ObjectMeta.OwnerReferences[0].UID).To(BeEquivalentTo(types.UID(hardwareUUID)),
 				"Expected owner reference UID to match hardwareUUID")
 		})
 	})
@@ -384,7 +415,7 @@ func Test_Machine_reconciliation_with_available_hardware(t *testing.T) {
 		t.Parallel()
 		g := NewWithT(t)
 
-		workflow := &tinkv1.Workflow{}
+		workflow := &tinkv2.Workflow{}
 
 		g.Expect(client.Get(ctx, globalResourceName, workflow)).To(Succeed(), "Expected workflow to be created")
 
@@ -1704,18 +1735,8 @@ tasks:
 	_, err := reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
 	g.Expect(err).NotTo(HaveOccurred(), "Unexpected reconciliation error")
 
-	ctx := context.Background()
-
-	template := &tinkv1.Template{}
-	g.Expect(client.Get(ctx, types.NamespacedName{
-		Name:      tinkerbellMachineName,
-		Namespace: clusterNamespace,
-	}, template)).To(Succeed(), "Expected template to be created")
-
-	g.Expect(template.Spec.Data).NotTo(BeNil(), "Expected template data to be set")
-	g.Expect(*template.Spec.Data).To(Equal(clusterTemplateData),
-		"Expected template data to match cluster-level override, diff: %s",
-		cmp.Diff(clusterTemplateData, *template.Spec.Data))
+	// The machine runs the Tasks the cluster-level template converts to.
+	expectNativeWorkflow(g, client, clusterTemplateData)
 }
 
 func Test_Machine_reconciliation_uses_cluster_level_template_ref(t *testing.T) {
@@ -1766,18 +1787,8 @@ tasks:
 	_, err := reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
 	g.Expect(err).NotTo(HaveOccurred(), "Unexpected reconciliation error")
 
-	ctx := context.Background()
-
-	template := &tinkv1.Template{}
-	g.Expect(client.Get(ctx, types.NamespacedName{
-		Name:      tinkerbellMachineName,
-		Namespace: clusterNamespace,
-	}, template)).To(Succeed(), "Expected template to be created")
-
-	g.Expect(template.Spec.Data).NotTo(BeNil(), "Expected template data to be set")
-	g.Expect(*template.Spec.Data).To(Equal(refTemplateData),
-		"Expected template data to match referenced template, diff: %s",
-		cmp.Diff(refTemplateData, *template.Spec.Data))
+	// The machine runs the Tasks the referenced template converts to.
+	expectNativeWorkflow(g, client, refTemplateData)
 }
 
 func Test_Machine_reconciliation_uses_machine_level_template_inline(t *testing.T) {
@@ -1817,18 +1828,8 @@ tasks:
 	_, err := reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
 	g.Expect(err).NotTo(HaveOccurred(), "Unexpected reconciliation error")
 
-	ctx := context.Background()
-
-	template := &tinkv1.Template{}
-	g.Expect(client.Get(ctx, types.NamespacedName{
-		Name:      tinkerbellMachineName,
-		Namespace: clusterNamespace,
-	}, template)).To(Succeed(), "Expected template to be created")
-
-	g.Expect(template.Spec.Data).NotTo(BeNil(), "Expected template data to be set")
-	g.Expect(*template.Spec.Data).To(Equal(machineTemplateData),
-		"Expected template data to match machine-level inline, not cluster-level, diff: %s",
-		cmp.Diff(machineTemplateData, *template.Spec.Data))
+	// The machine runs the Tasks the machine-level template converts to, not the cluster-level one.
+	expectNativeWorkflow(g, client, machineTemplateData)
 }
 
 func Test_Machine_reconciliation_uses_machine_level_template_ref(t *testing.T) {
@@ -1881,18 +1882,8 @@ tasks:
 	_, err := reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
 	g.Expect(err).NotTo(HaveOccurred(), "Unexpected reconciliation error")
 
-	ctx := context.Background()
-
-	template := &tinkv1.Template{}
-	g.Expect(client.Get(ctx, types.NamespacedName{
-		Name:      tinkerbellMachineName,
-		Namespace: clusterNamespace,
-	}, template)).To(Succeed(), "Expected template to be created")
-
-	g.Expect(template.Spec.Data).NotTo(BeNil(), "Expected template data to be set")
-	g.Expect(*template.Spec.Data).To(Equal(refTemplateData),
-		"Expected template data to match machine-level ref template, diff: %s",
-		cmp.Diff(refTemplateData, *template.Spec.Data))
+	// The machine runs the Tasks the machine-level referenced template converts to.
+	expectNativeWorkflow(g, client, refTemplateData)
 }
 
 func Test_Machine_reconciliation_fails_when_no_template_configured(t *testing.T) {
@@ -2165,7 +2156,7 @@ func Test_Machine_reconciliation_with_ipam_pool(t *testing.T) {
 	g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, waiting)).To(Succeed())
 	g.Expect(waiting.Spec.HardwareName).To(Equal(hardwareName), "hardware selection is persisted while waiting")
 	g.Expect(conditions.GetReason(waiting, infrastructurev1.IPAddressClaimedCondition)).To(Equal(infrastructurev1.WaitingForIPAddressReason))
-	g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, &tinkv1.Workflow{})).NotTo(Succeed(),
+	g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, &tinkv2.Workflow{})).NotTo(Succeed(),
 		"no Workflow before the address is known")
 
 	// Play the IPAM provider.
@@ -2210,7 +2201,7 @@ func Test_Machine_reconciliation_with_ipam_pool(t *testing.T) {
 		t.Parallel()
 		g := NewWithT(t)
 
-		g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, &tinkv1.Workflow{})).To(Succeed())
+		g.Expect(client.Get(ctx, types.NamespacedName{Name: tinkerbellMachineName, Namespace: clusterNamespace}, &tinkv2.Workflow{})).To(Succeed())
 	})
 }
 

@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - get
@@ -88,6 +95,7 @@ rules:
 - apiGroups:
   - tinkerbell.org
   resources:
+  - tasks
   - templates
   - templates/status
   - workflows

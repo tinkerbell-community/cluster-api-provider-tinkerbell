@@ -22,7 +22,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega" //nolint:revive // one day we will remove gomega
-	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,9 +29,9 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
+	"github.com/tinkerbell/cluster-api-provider-tinkerbell/controller"
 )
 
 func readyMachine() *clusterv1.Machine {
@@ -172,9 +171,7 @@ func TestSetResourceOwnership(t *testing.T) {
 
 	// Register Tinkerbell types so controllerutil.SetControllerReference
 	// can resolve the TinkerbellMachine GVK.
-	sb := &scheme.Builder{GroupVersion: tinkv1.GroupVersion}
-	sb.Register(&tinkv1.Template{}, &tinkv1.TemplateList{})
-	if err := sb.AddToScheme(s); err != nil {
+	if err := controller.AddToSchemeTinkerbell(s); err != nil {
 		t.Fatal(err)
 	}
 
@@ -234,9 +231,9 @@ func TestSetResourceOwnership(t *testing.T) {
 				scheme:             s,
 			}
 
-			obj := &tinkv1.Template{
+			obj := &tinkv2.Task{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-template",
+					Name:      "test-task",
 					Namespace: tc.objNamespace,
 				},
 			}
@@ -287,7 +284,7 @@ func TestLabelToMachineMapper(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			obj := &tinkv1.Workflow{
+			obj := &tinkv2.Workflow{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workflow",
 					Namespace: "tinkerbell",

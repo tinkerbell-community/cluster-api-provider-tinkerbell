@@ -39,7 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	rufiov2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell/bmc"
 	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
 
@@ -63,12 +63,12 @@ const (
 // TinkerbellMachineReconciler implements Reconciler interface by managing Tinkerbell machines.
 type TinkerbellMachineReconciler struct {
 	client.Client
-	// TinkerbellClient is the client used for Tinkerbell CRD operations (Hardware, Template,
+	// TinkerbellClient is the client used for Tinkerbell CRD operations (Hardware, Task, Template,
 	// Workflow, BMC Job). When targeting an external Tinkerbell cluster this differs from Client.
 	TinkerbellClient client.Client
 	// ExternalTinkerbell indicates whether TinkerbellClient targets an external Tinkerbell cluster.
 	ExternalTinkerbell bool
-	// WatchManager handles JIT per-namespace watches for Workflow and Job objects
+	// WatchManager handles JIT per-namespace watches for Workflow, Task and Job objects
 	// on the external Tinkerbell cluster. Nil in local mode.
 	WatchManager     *tinkcluster.NamespaceWatchManager
 	Scheme           *runtime.Scheme
@@ -81,8 +81,10 @@ type TinkerbellMachineReconciler struct {
 // +kubebuilder:rbac:groups="",resources=secrets;,verbs=get;list;watch
 // +kubebuilder:rbac:groups=tinkerbell.org,resources=hardware;hardware/status,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=tinkerbell.org,resources=templates;templates/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=tinkerbell.org,resources=tasks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tinkerbell.org,resources=workflows;workflows/status,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=bmc.tinkerbell.org,resources=jobs,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=ipam.cluster.x-k8s.io,resources=ipaddressclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ipam.cluster.x-k8s.io,resources=ipaddresses,verbs=get;list;watch
 
@@ -263,39 +265,32 @@ func (r *TinkerbellMachineReconciler) SetupWithManager(ctx context.Context, mgr 
 			),
 		)
 
-	// In local mode, watch Workflow and Job objects via owner references on the
-	// management cluster (for backward compatibility with same-namespace resources)
-	// and via labels (for cross-namespace resources).
+	// In local mode, watch the Workflow, Task and Job objects CAPT creates via owner
+	// references on the management cluster (for backward compatibility with same-namespace
+	// resources) and via labels (for cross-namespace resources).
 	// In external mode, the WatchManager registers JIT per-namespace watches
 	// dynamically when Hardware is selected.
 	if !r.ExternalTinkerbell {
-		ctrlBuilder = ctrlBuilder.
-			Watches(
-				&tinkv1.Workflow{},
-				handler.EnqueueRequestForOwner(
-					mgr.GetScheme(),
-					mgr.GetRESTMapper(),
-					&infrastructurev1.TinkerbellMachine{},
-					handler.OnlyControllerOwner(),
-				),
-			).
-			Watches(
-				&rufiov2.Job{},
-				handler.EnqueueRequestForOwner(
-					mgr.GetScheme(),
-					mgr.GetRESTMapper(),
-					&infrastructurev1.TinkerbellMachine{},
-					handler.OnlyControllerOwner(),
-				),
-			).
-			Watches(
-				&tinkv1.Workflow{},
-				handler.EnqueueRequestsFromMapFunc(labelToMachineMapper),
-			).
-			Watches(
-				&rufiov2.Job{},
-				handler.EnqueueRequestsFromMapFunc(labelToMachineMapper),
-			)
+		for _, newObject := range []func() client.Object{
+			func() client.Object { return &tinkv2.Workflow{} },
+			func() client.Object { return &tinkv2.Task{} },
+			func() client.Object { return &rufiov2.Job{} },
+		} {
+			ctrlBuilder = ctrlBuilder.
+				Watches(
+					newObject(),
+					handler.EnqueueRequestForOwner(
+						mgr.GetScheme(),
+						mgr.GetRESTMapper(),
+						&infrastructurev1.TinkerbellMachine{},
+						handler.OnlyControllerOwner(),
+					),
+				).
+				Watches(
+					newObject(),
+					handler.EnqueueRequestsFromMapFunc(labelToMachineMapper),
+				)
+		}
 	}
 
 	c, err := ctrlBuilder.Build(r)

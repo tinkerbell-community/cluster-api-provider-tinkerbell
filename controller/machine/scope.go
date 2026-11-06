@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/go-logr/logr"
-	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
@@ -155,15 +154,13 @@ func (e *errRequeueRequested) Error() string {
 	return "requeue requested"
 }
 
-func (scope *machineReconcileScope) ensureTemplateAndWorkflow(hw *tinkv2.Hardware) (*tinkv1.Workflow, error) {
+// ensureWorkflow returns the machine's Workflow, creating it, and the Tasks or Template it runs,
+// when it does not exist yet (see createWorkflow).
+func (scope *machineReconcileScope) ensureWorkflow(hw *tinkv2.Hardware) (*tinkv2.Workflow, error) {
 	wf, err := scope.getWorkflow()
 
 	switch {
 	case apierrors.IsNotFound(err):
-		if err := scope.ensureTemplate(hw); err != nil {
-			return nil, fmt.Errorf("failed to ensure template: %w", err)
-		}
-
 		if err := scope.createWorkflow(hw); err != nil {
 			return nil, fmt.Errorf("failed to create workflow: %w", err)
 		}
@@ -223,24 +220,24 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv2.Hardware) error { //nol
 		return nil
 	}
 
-	wf, err := scope.ensureTemplateAndWorkflow(hw)
+	wf, err := scope.ensureWorkflow(hw)
 	if err != nil {
 		if errors.Is(err, &errRequeueRequested{}) {
 			return nil
 		}
 
-		return fmt.Errorf("ensure template and workflow returned: %w", err)
+		return fmt.Errorf("ensure workflow returned: %w", err)
 	}
 
-	// STATE_* is needed for Helm charts <= 0.6.2
-	switch wf.Status.State {
-	case tinkv1.WorkflowStateFailed, tinkv1.WorkflowState("STATE_FAILED"):
+	// The Workflow's state, as v1alpha1 status.state was. Zero means it has not started.
+	switch wf.Status.Metadata.Workflow.State {
+	case tinkv2.StateFailed:
 		return errWorkflowFailed
-	case tinkv1.WorkflowStateTimeout, tinkv1.WorkflowState("STATE_TIMEOUT"):
+	case tinkv2.StateTimeout:
 		return errWorkflowTimeout
-	case tinkv1.WorkflowStatePreparing, tinkv1.WorkflowStatePending, tinkv1.WorkflowStateRunning, tinkv1.WorkflowStatePost:
+	case tinkv2.StatePreparing, tinkv2.StatePending, tinkv2.StateRunning, tinkv2.StatePost:
 		return nil
-	case tinkv1.WorkflowStateSuccess, tinkv1.WorkflowState("STATE_SUCCESS"):
+	case tinkv2.StateSuccess:
 		scope.log.Info("Marking TinkerbellMachine as Ready")
 		scope.tinkerbellMachine.Status.Ready = true
 		scope.tinkerbellMachine.Status.Initialization = &infrastructurev1.TinkerbellMachineInitializationStatus{
@@ -303,7 +300,7 @@ func (scope *machineReconcileScope) MachineScheduledForDeletion() bool {
 	return !scope.tinkerbellMachine.DeletionTimestamp.IsZero()
 }
 
-// DeleteMachineWithDependencies removes template and workflow objects associated with given machine.
+// DeleteMachineWithDependencies removes the template, task and workflow objects associated with given machine.
 func (scope *machineReconcileScope) DeleteMachineWithDependencies() error { //nolint:cyclop
 	scope.log.Info("Removing machine", "hardwareName", scope.tinkerbellMachine.Spec.HardwareName)
 
@@ -325,7 +322,7 @@ func (scope *machineReconcileScope) DeleteMachineWithDependencies() error { //no
 	// If the Hardware is not found, we can't do any BMC operations. In this case we just remove all
 	// the other dependencies and remove the finalizer from the TinkerbellMachine object so that it can be deleted.
 	if apierrors.IsNotFound(err) {
-		scope.log.Info("Hardware not found, only template, workflow and finalizer will be removed",
+		scope.log.Info("Hardware not found, only template, tasks, workflow and finalizer will be removed",
 			"hardwareName", scope.tinkerbellMachine.Spec.HardwareName,
 		)
 
@@ -368,10 +365,14 @@ func (scope *machineReconcileScope) DeleteMachineWithDependencies() error { //no
 	return nil
 }
 
-// removeDependencies removes the Template and Workflow linked to the Machine/Hardware.
+// removeDependencies removes the Template, Tasks and Workflow linked to the Machine/Hardware.
 func (scope *machineReconcileScope) removeDependencies() error {
 	if err := scope.removeTemplate(); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("removing Template: %w", err)
+	}
+
+	if err := scope.removeTasks(nil); err != nil {
+		return fmt.Errorf("removing Tasks: %w", err)
 	}
 
 	if err := scope.removeWorkflow(); err != nil && !apierrors.IsNotFound(err) {

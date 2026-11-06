@@ -332,7 +332,7 @@ func (scope *machineReconcileScope) ensureHardware() (*tinkv2.Hardware, error) {
 	}
 
 	// In JIT watch mode, ensure there is a namespace-scoped informer cache
-	// watching Workflows and Jobs in the Hardware's namespace so that the
+	// watching Workflows, Tasks and Jobs in the Hardware's namespace so that the
 	// controller receives events for resources created there.
 	if scope.watchManager != nil {
 		if err := scope.watchManager.EnsureWatch(scope.ctx, hw.Namespace); err != nil {
