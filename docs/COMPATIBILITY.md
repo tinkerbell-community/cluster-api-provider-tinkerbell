@@ -15,8 +15,16 @@ Tinkerbell v0.28.0 stores Workflow states by name (`Pending`, ...) instead of as
 v0.9.0 cannot read those; CAPT v0.9.1 reads both. With Tinkerbell v0.28.0 or later, use CAPT
 v0.9.1 or later, and upgrade CAPT first.
 
+Tinkerbell can remove the CRDs of the kinds that only exist in `v1alpha1`, Template among them
+(`--enable-deprecated-crd-removal`, off by default). CAPT v0.9.1 and earlier can neither provision
+nor delete machines without the Template CRD. CAPT v0.9.2 works without it, but a template that
+does not convert to `v1alpha2` Tasks, and a `templateRef`, need a Template: without the CRD,
+creating the Workflow fails (`tinkerbell no longer serves v1alpha1 Templates`). Upgrade CAPT to
+v0.9.2, and make sure every machine's template is inline and converts, before turning removal on.
+
 | CAPT | Tinkerbell (tinkerbell-community) |
 | ---- | --------------------------------- |
+| v0.9.2 | v0.27.0 or later; needed for a Tinkerbell without the Template CRD |
 | v0.9.1 | v0.27.0 or later |
 | v0.9.0 | v0.27.x |
 | v0.8.x and earlier | any release that serves `v1alpha1` (v0.27 and v0.28 do) |
@@ -31,7 +39,7 @@ versions exactly as Tinkerbell's conversion webhook does.
 | `Hardware` | `tinkerbell.org/v1alpha2` | Selects and claims it (labels, finalizer), writes `spec.instance.userdata`, the IPAM address, and the provisioned annotation, all as merge patches of those fields only |
 | `Workflow` | `tinkerbell.org/v1alpha2` | Creates one per machine; follows `status.metadata.workflow.state` |
 | `Task` | `tinkerbell.org/v1alpha2` | Creates the machine's template tasks, `<machine>-<task>`, for a Workflow that runs natively |
-| `Template` | `tinkerbell.org/v1alpha1` | Reads the Templates `templateRef` and the template override annotation name; creates the machine's Template for a Workflow in compatibility mode |
+| `Template` | `tinkerbell.org/v1alpha1` | Reads the Templates `templateRef` and the template override annotation name; creates the machine's Template for a Workflow in compatibility mode. Not needed for an inline template that converts, so CAPT works when Tinkerbell has removed the Template CRD |
 | `Job` | `bmc.tinkerbell.org/v1alpha2` | Creates power off (deletion) and power cycle (in-place recovery) Jobs that reference the Hardware |
 
 The `TinkerbellMachine`/`TinkerbellMachineTemplate` API is unchanged: the template is still a
