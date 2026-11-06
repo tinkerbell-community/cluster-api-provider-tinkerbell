@@ -2,12 +2,14 @@ package machine
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -16,6 +18,10 @@ import (
 var (
 	// ErrTemplateRefNoData is returned when a Template referenced by TemplateRef has no spec.data.
 	ErrTemplateRefNoData = fmt.Errorf("template referenced by TemplateRef has no spec.data")
+
+	// ErrTemplatesNotServed is returned when a v1alpha1 Template is needed and Tinkerbell no
+	// longer serves Templates: their CRD was removed once Templates moved to v1alpha2 Tasks.
+	ErrTemplatesNotServed = errors.New("tinkerbell no longer serves v1alpha1 Templates")
 
 	// ErrNoTemplateFound is returned when no template source is configured at any level.
 	ErrNoTemplateFound = fmt.Errorf("no template found: set templateInline or templateRef on TinkerbellMachine, "+
@@ -31,6 +37,10 @@ func (scope *machineReconcileScope) fetchTemplateRefData(name, namespace, source
 		Namespace: cmp.Or(namespace, scope.tinkerbellNamespace()),
 	}
 	if err := scope.tinkerbellClient.Get(scope.ctx, namespacedName, refTemplate); err != nil {
+		if meta.IsNoMatchError(err) {
+			return "", fmt.Errorf("getting Template %q referenced by %s: %w; use templateInline", namespacedName.String(), source, ErrTemplatesNotServed)
+		}
+
 		return "", fmt.Errorf("failed to get Template %q referenced by %s: %w", namespacedName.String(), source, err)
 	}
 	if refTemplate.Spec.Data == nil {
@@ -51,7 +61,8 @@ func (scope *machineReconcileScope) templateExists() (bool, error) {
 		return true, nil
 	}
 
-	if !apierrors.IsNotFound(err) {
+	// With Templates no longer served, there is none.
+	if !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err) {
 		return false, fmt.Errorf("checking if template exists: %w", err)
 	}
 
@@ -113,6 +124,10 @@ func (scope *machineReconcileScope) createTemplate(data string) error {
 	}
 
 	if err := scope.tinkerbellClient.Create(scope.ctx, templateObject); err != nil {
+		if meta.IsNoMatchError(err) {
+			return fmt.Errorf("creating Tinkerbell template: %w", ErrTemplatesNotServed)
+		}
+
 		return fmt.Errorf("creating Tinkerbell template: %w", err)
 	}
 
@@ -274,7 +289,8 @@ func (scope *machineReconcileScope) removeTemplate() error {
 
 	err := scope.tinkerbellClient.Get(scope.ctx, namespacedName, template)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
+		// With Templates no longer served, there is none to remove.
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 			scope.log.Info("Template already removed", "name", namespacedName)
 
 			return nil

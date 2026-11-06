@@ -237,6 +237,10 @@ func (scope *machineReconcileScope) createCompatibilityWorkflow(wf *tinkv2.Workf
 
 	if data != "" {
 		if err := scope.createTemplate(data); err != nil {
+			if errors.Is(err, ErrTemplatesNotServed) {
+				return fmt.Errorf("the Workflow cannot run v1alpha2 Tasks (%s) and cannot fall back to v1alpha1 compatibility mode: %w", reason, err)
+			}
+
 			return err
 		}
 	}
