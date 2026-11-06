@@ -37,8 +37,8 @@ CAPT builds the `v1alpha1` Workflow it has always created (the machine's Templat
 - Otherwise CAPT creates the machine's Template and the converted Workflow, which Tinkerbell runs
   in `v1alpha1` compatibility mode, rendering the Template exactly as before. The Workflow's
   `capt.tinkerbell.org/v1alpha1-compatibility` annotation and an event on the `TinkerbellMachine`
-  say why: the template's structure depends on templating (`range`, `if`, `toYaml`, a disk index
-  nested in another call such as `formatPartition`, ...), it has several tasks (CAPT's Workflow
+  say why: the template's structure depends on templating (`range`, `if`, `toYaml`, ...) or it
+  uses data with no `v1alpha2` equivalent (such as `.Hardware.Interfaces`), it has several tasks (CAPT's Workflow
   always has boot options, which `v1alpha2` applies per task), its customboot actions are
   templated, a Task of the same name already exists, or the machine's Template already exists
   (a machine an earlier CAPT started).

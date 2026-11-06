@@ -295,15 +295,14 @@ the way Tinkerbell converts a `v1alpha1` Template (see Tinkerbell's
   converts when its structure does not depend on templating: every `{{ }}` is a single
   expression inside a string value, there is no `range`, `if`, `with` or `define` around
   tasks or actions, no `toYaml`/`nindent`, and every variable it uses has a `v1alpha2`
-  equivalent (`.device_1`, `.Hardware.Disks` as a whole expression, `.Hardware.UserData`,
+  equivalent (`.device_1`, `index .Hardware.Disks N` (also inside `formatPartition`), `.Hardware.UserData`,
   `.Hardware.Metadata.Instance.ID`, ...). The template may have several tasks only when the
   machine has no boot options (CAPT always toggles netboot, so in practice: a single task).
 - **In `v1alpha1` compatibility mode** otherwise: CAPT creates the machine's `Template`, as it
   did before, and a Workflow that runs it, which Tinkerbell renders exactly as it rendered
   `v1alpha1` Workflows. CAPT records why on the Workflow (annotation
   `capt.tinkerbell.org/v1alpha1-compatibility`) and as an event on the `TinkerbellMachine`.
-  The example below runs in compatibility mode: `formatPartition ( index .Hardware.Disks 0 ) 3`
-  nests the disk inside another call, which the conversion does not translate.
+  The example below runs natively: it converts to a single Task.
 
 Both modes provision the machine the same way; nothing needs to change in existing templates.
 A machine whose `Template` an earlier CAPT created keeps running it.

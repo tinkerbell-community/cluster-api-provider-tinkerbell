@@ -18,6 +18,7 @@ package machine //nolint:testpackage
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -100,8 +101,8 @@ tasks:
 {{- end }}
 `
 
-	// partitionTemplate writes to a partition of the first disk, which the conversion does not
-	// translate: it rewrites "index .Hardware.Disks N" only as an action's whole expression.
+	// partitionTemplate writes to a partition of the first disk, nesting the disk index in
+	// formatPartition as CAPT's Quick Start template does.
 	partitionTemplate = `version: "0.1"
 name: partition
 global_timeout: 600
@@ -423,9 +424,9 @@ func Test_createWorkflow_falls_back_to_the_v1alpha1_template(t *testing.T) {
 			data:       rangeTemplate,
 			wantReason: `the template does not convert to v1alpha2 Tasks: it uses "range"`,
 		},
-		"a_partition_of_an_indexed_disk": {
-			data:       partitionTemplate,
-			wantReason: "the template does not convert to v1alpha2 Tasks: it uses .Hardware.Disks",
+		"an_interface_of_the_hardware": {
+			data:       strings.Replace(partitionTemplate, "( index .Hardware.Disks 0 ) 3", "( index .Hardware.Interfaces 0 ).DHCP.IfaceName 3", 1),
+			wantReason: "the template does not convert to v1alpha2 Tasks: it uses .Hardware.Interfaces",
 		},
 		"several_tasks_with_boot_options": {
 			data:       twoTaskTemplate,
@@ -644,4 +645,27 @@ func Test_removeDependencies_removes_the_workflow_tasks_and_template(t *testing.
 	tasks := listTasks(g, scope)
 	g.Expect(tasks).To(HaveLen(1))
 	g.Expect(tasks[0].Name).To(Equal("someone-elses"), "only the machine's Tasks are removed")
+}
+
+// A disk index nested in another call, as in CAPT's Quick Start template, converts: the Workflow runs
+// the template's Task natively.
+func Test_createWorkflow_runs_a_nested_disk_index_natively(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(true)
+	scope := workflowTestScope(g, partitionTemplate, hw)
+	g.Expect(scope.createWorkflow(hw)).To(Succeed())
+
+	tasks := listTasks(g, scope)
+	g.Expect(tasks).To(HaveLen(1))
+	g.Expect(tasks[0].Spec.Actions[0].Env).To(HaveKeyWithValue("DEST_DISK",
+		"{{formatPartition ((index .hardware.spec.storageDevices 0).name) 3}}"))
+	expectOwnedByMachine(g, scope, &tasks[0])
+
+	wf := getWorkflow(g, scope)
+	g.Expect(wf.Annotations).NotTo(HaveKey(AnnotationCompatibilityMode))
+	g.Expect(wf.Spec.Tasks).To(HaveLen(1))
+	g.Expect(wf.Spec.Tasks[0].TaskRef.Name).To(Equal(tasks[0].Name))
+	expectV1Alpha1View(g, scope, hw, wf)
 }
