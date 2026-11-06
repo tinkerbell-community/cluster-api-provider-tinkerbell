@@ -144,8 +144,9 @@ func main() {
 
 	// Initialize event recorder.
 	// GetEventRecorderFor is deprecated in favor of GetEventRecorder, but
-	// record.InitFromRecorder requires the old record.EventRecorder type.
-	record.InitFromRecorder(mgr.GetEventRecorderFor("tinkerbell-controller"))
+	// record.InitFromRecorder requires the old record.EventRecorder type, as
+	// Cluster API's own controllers still do.
+	record.InitFromRecorder(mgr.GetEventRecorderFor("tinkerbell-controller")) //nolint:staticcheck // SA1019: Cluster API's record package needs the old recorder.
 
 	// Setup the context that's going to be used in controllers and for the manager.
 	ctx := ctrl.SetupSignalHandler()
