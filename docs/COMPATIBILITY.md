@@ -9,7 +9,10 @@ CAPT requires Tinkerbell from [tinkerbell-community](https://github.com/tinkerbe
 **v0.27.0 or later**. It reads and writes Hardware, Workflows, Tasks and bmc Jobs as
 `tinkerbell.org/v1alpha2` and `bmc.tinkerbell.org/v1alpha2`, which Tinkerbell stores from v0.27.0 on.
 Earlier CAPT releases use the deprecated `v1alpha1` kinds; Tinkerbell v0.27 still serves those
-through its conversion webhook, so upgrade Tinkerbell first, then CAPT.
+through its conversion webhook, so upgrade Tinkerbell first, then CAPT. From Tinkerbell v0.26 or
+earlier, upgrade straight to v0.28.2 or later: v0.27.0 to v0.28.1 cannot finish moving the stored
+objects to `v1alpha2` in place and restart until replaced (see the
+[v0.28.2 release notes](https://github.com/tinkerbell-community/tinkerbell/releases/tag/v0.28.2)).
 
 Tinkerbell v0.28.0 stores Workflow states by name (`Pending`, ...) instead of as numbers. CAPT
 v0.9.0 cannot read those; CAPT v0.9.1 reads both. With Tinkerbell v0.28.0 or later, use CAPT
