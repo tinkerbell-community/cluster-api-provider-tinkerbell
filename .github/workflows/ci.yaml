@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 env:
   CGO_ENABLED: 0
   GO_VERSION: '1.26'
@@ -58,6 +61,10 @@ jobs:
     name: Build and push image
     runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/main' }}
+    # The default token cannot write packages; the release workflow grants the same.
+    permissions:
+      contents: read
+      packages: write
     needs:
       - validate
       - build
