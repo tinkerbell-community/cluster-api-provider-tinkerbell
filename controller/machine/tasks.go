@@ -48,6 +48,7 @@ const (
 	taskNotFoundReason                   = "TaskNotFound"
 	taskConflictReason                   = "TaskConflict"
 	workflowNotRenderedReason            = "WorkflowNotRendered"
+	bootModeWithoutBMCReason             = "BootModeWithoutBMC"
 )
 
 var (
@@ -146,6 +147,11 @@ func (scope *machineReconcileScope) taskBootOptions(hw *tinkv2.Hardware, tasks [
 				"spec.bootOptions is ignored: the tasks entries set their own bootOptions")
 		}
 
+		for _, name := range bootModesWithoutBMC(hw, tasks) {
+			record.Warnf(scope.tinkerbellMachine, bootModeWithoutBMCReason,
+				"tasks entry %q sets bootOptions.bootMode, but Hardware %s/%s has no BMC: Tinkerbell will fail the Workflow", name, hw.Namespace, hw.Name)
+		}
+
 		return options, nil
 	}
 
@@ -161,6 +167,24 @@ func (scope *machineReconcileScope) taskBootOptions(hw *tinkv2.Hardware, tasks [
 	options[0] = first
 
 	return options, nil
+}
+
+// bootModesWithoutBMC returns the names of the entries of tasks that set a boot mode, which
+// Tinkerbell carries out through the Hardware's BMC, when hw has no BMC.
+func bootModesWithoutBMC(hw *tinkv2.Hardware, tasks []infrastructurev1.MachineTask) []string {
+	if hasBMC(hw) {
+		return nil
+	}
+
+	var names []string
+
+	for _, task := range tasks {
+		if task.BootOptions != nil && task.BootOptions.BootMode != "" {
+			names = append(names, task.Name)
+		}
+	}
+
+	return names
 }
 
 // defaultBootOptions returns, as v1alpha2, the boot options CAPT gives a machine's Workflow

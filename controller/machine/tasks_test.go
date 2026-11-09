@@ -462,3 +462,17 @@ func Test_reconcile_reports_a_workflow_that_does_not_render(t *testing.T) {
 	g.Expect(errors.Is(err, errWorkflowNotRendered)).To(BeTrue(), "got %v", err)
 	g.Expect(err.Error()).To(ContainSubstring("boom"))
 }
+
+// An entry's bootMode needs a BMC: Tinkerbell fails the Workflow on Hardware without one, so
+// CAPT names those entries for a warning.
+func Test_bootModesWithoutBMC(t *testing.T) {
+	t.Parallel()
+
+	tasks := []infrastructurev1.MachineTask{inlineTask("netboot"), inlineTask("toggle"), refTask("plain", "shared")}
+	tasks[0].BootOptions = &tinkv2.BootOptions{ToggleNetboot: true, BootMode: tinkv2.BootModeNetboot}
+	tasks[1].BootOptions = &tinkv2.BootOptions{ToggleNetboot: true}
+
+	g := NewWithT(t)
+	g.Expect(bootModesWithoutBMC(workflowTestHardware(false), tasks)).To(Equal([]string{"netboot"}))
+	g.Expect(bootModesWithoutBMC(workflowTestHardware(true), tasks)).To(BeEmpty())
+}

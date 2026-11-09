@@ -1190,8 +1190,10 @@ spec:
                       description: |-
                         BootOptions are applied around this Task, as in a task of a v1alpha2 Workflow: the
                         boot mode and netboot toggle before it, and netboot off, ISO eject and customboot post
-                        operations after it succeeds. When no entry of the list sets BootOptions, the first
-                        entry gets the machine's spec.bootOptions, with netboot toggled.
+                        operations after it succeeds. They are used as written: a BootMode is carried out
+                        through the Hardware's BMC, so Tinkerbell fails the Workflow on Hardware without one.
+                        When no entry of the list sets BootOptions, the first entry gets the machine's
+                        spec.bootOptions, with netboot toggled.
                       properties:
                         bootMode:
                           description: BootMode is the type of booting that will be

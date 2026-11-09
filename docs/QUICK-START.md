@@ -300,7 +300,8 @@ spec:
       - name: provision
         bootOptions:
           toggleNetboot: true
-          bootMode: netboot
+          # Add "bootMode: netboot" to have the BMC netboot the machine; only when every
+          # Hardware this list runs on has a BMC (see Boot options below).
         taskInline:
           volumes:
           - /dev:/dev
@@ -390,7 +391,11 @@ customboot `postOperations` apply after it succeeds.
 
 - **If any entry sets `bootOptions`**, every entry's are used exactly as written and entries
   without get none. CAPT adds nothing: no netboot toggle, no BMC check, no ISO URL rewrite.
-  Template a per-machine ISO URL with Hardware data if you need one.
+  A `bootMode` (`netboot`, `isoboot`, `customboot`) is carried out through the Hardware's BMC,
+  so set one only when every Hardware the list runs on has a BMC: on Hardware without one,
+  Tinkerbell fails the Workflow, and CAPT records a `BootModeWithoutBMC` warning beforehand.
+  `toggleNetboot` alone needs no BMC. CAPT does not insert the Hardware's ID into an entry's
+  `isoURL`, as it does for `spec.bootOptions`; template it with Hardware data if you need it.
 - **If no entry sets them**, the first entry gets the boot options CAPT has always applied:
   netboot toggled, plus the machine's `spec.bootOptions` boot mode when the Hardware has a BMC
   (see [Boot modes](#boot-modes)). With several entries, the "after" steps then run after the
@@ -440,8 +445,10 @@ make each template task an entry with `taskInline`, and:
 | `{{ .Hardware.Metadata.Instance.ID }}` | `{{ dig "spec" "instance" "lookupID" "" .hardware }}` |
 | `{{ .device_1 }}` (as a value) | `{{ .workflow.spec.globals.templateMap.device_1 }}` |
 
-Move the machine's `spec.bootOptions` onto the first entry as `bootOptions` with
-`toggleNetboot: true`, or leave it where it is and set no `bootOptions` on the entries. With the
+Leave the machine's `spec.bootOptions` where it is and set no `bootOptions` on the entries:
+that keeps today's behaviour, including the BMC check and the ISO URL rewrite. Move it onto the
+first entry as `bootOptions` with `toggleNetboot: true` only when every Hardware has a BMC (or
+the entry sets no `bootMode`), and template any per-machine `isoURL` yourself. With the
 CABPT in-place update extension installed, changing `tasks`, the templates or `bootOptions` of a
 running machine does not roll it out: CAPT only reads them when it provisions a machine.
 
@@ -498,8 +505,10 @@ Kubeadm bootstrap provider and you can ignore this.
 
 ##### Boot modes
 
-The `bootOptions.bootMode` field controls how the machine boots into the provisioning
-environment (HookOS). Available modes:
+The machine's `spec.bootOptions.bootMode` field controls how the machine boots into the
+provisioning environment (HookOS), for a template and for `tasks` entries that set no
+`bootOptions` (entries that do set them follow [Boot options](#boot-options) instead).
+Available modes:
 
 | Boot Mode | Description |
 |---|---|
@@ -508,15 +517,17 @@ environment (HookOS). Available modes:
 | `iso` | Deprecated alias for `isoboot`. Use `isoboot` instead. |
 | `customboot` | Custom BMC boot actions |
 
-**NOTE:** Boot modes only take effect when the Hardware has a BMC (see
-[Hardware requirements](#create-hardware-resources-to-make-tinkerbell-hardware-available)).
+**NOTE:** In `spec.bootOptions`, boot modes only take effect when the Hardware has a BMC (see
+[Hardware requirements](#create-hardware-resources-to-make-tinkerbell-hardware-available));
+on Hardware without one CAPT leaves them out.
 When using `iso` or `isoboot`, the `bootOptions.isoURL` field is required. CAPT inserts
 the Hardware's `spec.instance.lookupID` (with `:` replaced by `-`) into the ISO URL
 path to enable per-hardware ISO customization. The `customboot` actions keep their `v1alpha1`
 form in the `TinkerbellMachineTemplate`; CAPT converts each to the `v1alpha2` bmc operations
 it sets. Customboot actions whose values are templated (for example a media URL that uses
-`.Hardware.Interfaces`) make the machine's Workflow run in compatibility mode, where they are
-rendered with `v1alpha1` Hardware data as before.
+`.Hardware.Interfaces`) make a template's Workflow run in compatibility mode, where they are
+rendered with `v1alpha1` Hardware data as before; with `tasks` they are refused
+(`TemplatedCustombootConfig`): set `bootOptions` on the entries instead.
 
 ##### Provisioned annotation
 
