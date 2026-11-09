@@ -34,6 +34,8 @@ const (
 	ipamClusterName = "ipam-cluster"
 	// ipamOtherMachineUID identifies a machine that is not the one under test.
 	ipamOtherMachineUID = "22222222-2222-2222-2222-222222222222"
+	// ipamPreviousMachine names the machine that held the Hardware before the one under test.
+	ipamPreviousMachine = "previous-machine"
 )
 
 func ipamPool() *ipamv1.IPPoolReference {
@@ -806,7 +808,7 @@ func Test_reconcileIPAM_waits_for_a_previous_machines_terminating_claim(t *testi
 	machine := ipamMachine()
 	hw := ipamHardwareObject(ipamMAC)
 	previous := ipamMachine()
-	previous.Name = "previous-machine"
+	previous.Name = ipamPreviousMachine
 	previous.UID = ipamOtherMachineUID
 	claim := ownedClaim(previous, hw, ipamMAC)
 	claim.Finalizers = append(claim.Finalizers, "ipam.example.org/release")
@@ -835,7 +837,7 @@ func Test_reconcileIPAM_releases_the_terminating_claim_of_a_removed_machine(t *t
 	machine := ipamMachine()
 	hw := ipamHardwareObject(ipamMAC)
 	previous := ipamMachine()
-	previous.Name = "previous-machine"
+	previous.Name = ipamPreviousMachine
 	previous.UID = ipamOtherMachineUID
 	claim := ownedClaim(previous, hw, ipamMAC)
 	claim.Finalizers = append(claim.Finalizers, "ipam.example.org/release")
@@ -861,7 +863,7 @@ func Test_reconcileIPAM_releases_a_claim_whose_owner_name_was_reused(t *testing.
 	machine := ipamMachine()
 	hw := ipamHardwareObject(ipamMAC)
 	previous := ipamMachine()
-	previous.Name = "previous-machine"
+	previous.Name = ipamPreviousMachine
 	previous.UID = ipamOtherMachineUID
 	claim := ownedClaim(previous, hw, ipamMAC)
 	claim.Finalizers = append(claim.Finalizers, "ipam.example.org/release")
