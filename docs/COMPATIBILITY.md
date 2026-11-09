@@ -24,6 +24,7 @@ nor delete machines without the Template CRD. CAPT v0.9.2 works without it, but 
 does not convert to `v1alpha2` Tasks, and a `templateRef`, need a Template: without the CRD,
 creating the Workflow fails (`tinkerbell no longer serves v1alpha1 Templates`). Upgrade CAPT to
 v0.9.2, and make sure every machine's template is inline and converts, before turning removal on.
+Machines provisioned from `tasks` never need the Template CRD.
 
 | CAPT | Tinkerbell (tinkerbell-community) |
 | ---- | --------------------------------- |
@@ -41,18 +42,25 @@ versions exactly as Tinkerbell's conversion webhook does.
 |---|---|---|
 | `Hardware` | `tinkerbell.org/v1alpha2` | Selects and claims it (labels, finalizer), writes `spec.instance.userdata`, the IPAM address, and the provisioned annotation, all as merge patches of those fields only |
 | `Workflow` | `tinkerbell.org/v1alpha2` | Creates one per machine; follows `status.metadata.workflow.state` |
-| `Task` | `tinkerbell.org/v1alpha2` | Creates the machine's template tasks, `<machine>-<task>`, for a Workflow that runs natively |
-| `Template` | `tinkerbell.org/v1alpha1` | Reads the Templates `templateRef` and the template override annotation name; creates the machine's Template for a Workflow in compatibility mode. Not needed for an inline template that converts, so CAPT works when Tinkerbell has removed the Template CRD |
+| `Task` | `tinkerbell.org/v1alpha2` | Creates the Tasks of a machine's inline `tasks` entries, `<machine>-<name>`, or of its template's tasks, `<machine>-<task>`; reads, and never changes, the Tasks `taskRef` entries and the `capt-task-refs` annotation name |
+| `Template` | `tinkerbell.org/v1alpha1` | Only for the deprecated sources: reads the Templates `templateRef` and the template override annotation name; creates the machine's Template for a Workflow in compatibility mode. Not needed for `tasks` or an inline template that converts, so CAPT works when Tinkerbell has removed the Template CRD |
 | `Job` | `bmc.tinkerbell.org/v1alpha2` | Creates power off (deletion) and power cycle (in-place recovery) Jobs that reference the Hardware |
 
-The `TinkerbellMachine`/`TinkerbellMachineTemplate` API is unchanged: the template is still a
-`v1alpha1` Template definition, and `bootOptions` keep their `v1alpha1` boot mode and customboot
-actions, which CAPT converts to `v1alpha2` itself.
+`TinkerbellMachine` and `TinkerbellCluster` (and their templates) have `tasks`: `v1alpha2` Tasks,
+inline or by reference, each with optional `v1alpha2` boot options, which CAPT runs in a native
+Workflow exactly as written (see [Customize the provisioning template](QUICK-START.md#customize-the-provisioning-template)).
+`templateInline`, `templateRef` and the template override annotation are deprecated but keep
+working unchanged: the template is a `v1alpha1` Template definition, and `spec.bootOptions` keep
+their `v1alpha1` boot mode and customboot actions, which CAPT converts to `v1alpha2` itself.
 
 ### Workflows: native or v1alpha1 compatibility mode
 
-CAPT builds the `v1alpha1` Workflow it has always created (the machine's Template, its Hardware,
-`device_1`, the boot options) and converts it to `v1alpha2` with Tinkerbell's conversion. Then:
+A machine provisioned from `tasks` always gets a native Workflow: CAPT creates its inline Tasks
+and a Workflow that runs the entries in order, with no conversion involved.
+
+For the deprecated template sources, CAPT builds the `v1alpha1` Workflow it has always created
+(the machine's Template, its Hardware, `device_1`, the boot options) and converts it to `v1alpha2`
+with Tinkerbell's conversion. Then:
 
 - If the template converts to `v1alpha2` Tasks and the Workflow can run them, CAPT creates the
   Tasks and a Workflow that runs them, and no Template. This is what Tinkerbell itself does to a
@@ -108,7 +116,7 @@ storage (hub) API version. The previous `v1beta1` version remains served for
 backward compatibility. CRD conversion webhooks handle automatic bi-directional
 conversion between versions.
 
-- **v1beta2** — The hub (storage) version. New fields like `templateInline`,
+- **v1beta2** — The hub (storage) version. New fields like `tasks`, `templateInline`,
   `templateRef`, and `TinkerbellMachineConfig` live here. All resources are
   stored as v1beta2 in etcd.
 - **v1beta1** — The spoke (served) version. Existing v1beta1 manifests and
@@ -120,6 +128,7 @@ conversion between versions.
 |---|---|---|
 | `templateOverride` | `templateInline` | Renamed |
 | `templateOverrideRef` | `templateRef` | Renamed, uses `ObjectRef` |
+| *(none)* | `tasks` | v1beta2-only; kept in a conversion annotation, so a v1beta1 round trip preserves it |
 | `status.instanceStatus` | `status.state` | Renamed, same underlying type |
 | `imageLookup*` fields | *(removed)* | Dropped during up-conversion; not round-trippable |
 | `TinkerbellMachineSpec` (in templates) | `TinkerbellMachineConfig` | `hardwareName`/`providerID` excluded from templates |

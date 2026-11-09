@@ -264,27 +264,188 @@ spec:
 
 #### Customize the provisioning template
 
-CAPT requires a Tinkerbell Template for each machine. There is no default template — you must
-provide one at the cluster or machine level.
+CAPT needs to know what to run to provision each machine. There is no default: set `tasks` at
+the cluster or machine level (or name Tasks on the Hardware, see below).
 
-Set the `templateInline` field in the `TinkerbellMachineTemplate` spec with a full
-[Tinkerbell Template](https://docs.tinkerbell.org) definition, or use `templateRef` to reference
-an existing Tinkerbell Template object (`tinkerbell.org/v1alpha1`). The template is written
-in the `v1alpha1` Template format, as before, and supports Go template variables for
-hardware-specific values:
+`tasks` is an ordered list of Tinkerbell `v1alpha2` Tasks. Each entry has a `name` and exactly
+one of:
 
-| Variable | Description |
+- `taskInline`: a Task definition. CAPT creates it as a Task named `<machine>-<name>`, owned by
+  the machine and deleted with it.
+- `taskRef`: an existing Task you manage (`name`, optional `namespace`, defaulting to the
+  namespace the machine's Workflow is created in). CAPT never creates, changes or deletes it.
+
+Inline Tasks and references can be mixed. CAPT creates one Workflow per machine that runs the
+entries in order on the machine's Hardware, so what you write maps one to one onto a `v1alpha2`
+Workflow. A list holds at most 32 entries.
+
+Here is an example that streams an OS image to disk, configures cloud-init for the
+Tinkerbell metadata service, and kexecs into the installed OS:
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
+kind: TinkerbellMachineTemplate
+metadata:
+  name: capi-quickstart-control-plane
+  namespace: tink-system
+spec:
+  template:
+    spec:
+      hardwareAffinity:
+        required:
+        - labelSelector:
+            matchLabels:
+              tinkerbell.org/role: control-plane
+      tasks:
+      - name: provision
+        bootOptions:
+          toggleNetboot: true
+          bootMode: netboot
+        taskInline:
+          volumes:
+          - /dev:/dev
+          actions:
+          - name: "stream image"
+            image: quay.io/tinkerbell/actions/oci2disk
+            timeoutSeconds: 1200
+            env:
+              # Replace 'amd64' with the target node architecture (amd64 or arm64)
+              IMG_URL: ghcr.io/tinkerbell/cluster-api-provider-tinkerbell/ubuntu:2404-v1.35.2-amd64.gz
+              DEST_DISK: '{{ (index .hardware.spec.storageDevices 0).name }}'
+              COMPRESSED: "true"
+          - name: "add tink cloud-init config"
+            image: quay.io/tinkerbell/actions/writefile
+            timeoutSeconds: 90
+            env:
+              DEST_DISK: '{{ formatPartition (index .hardware.spec.storageDevices 0).name 3 }}'
+              FS_TYPE: ext4
+              DEST_PATH: /etc/cloud/cloud.cfg.d/10_tinkerbell.cfg
+              UID: "0"
+              GID: "0"
+              MODE: "0600"
+              DIRMODE: "0700"
+              CONTENTS: |
+                datasource:
+                  Ec2:
+                    metadata_urls: ["http://<TINKERBELL_VIP>:7080"]
+                    strict_id: false
+                system_info:
+                  default_user:
+                    name: tink
+                    groups: [wheel, adm]
+                    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+                    shell: /bin/bash
+                manage_etc_hosts: localhost
+                warnings:
+                  dsid_missing_source: off
+          - name: "add tink cloud-init ds-config"
+            image: quay.io/tinkerbell/actions/writefile
+            timeoutSeconds: 90
+            env:
+              DEST_DISK: '{{ formatPartition (index .hardware.spec.storageDevices 0).name 3 }}'
+              FS_TYPE: ext4
+              DEST_PATH: /etc/cloud/ds-identify.cfg
+              UID: "0"
+              GID: "0"
+              MODE: "0600"
+              DIRMODE: "0700"
+              CONTENTS: |
+                datasource: Ec2
+          - name: "kexec image"
+            image: ghcr.io/jacobweinstock/waitdaemon:latest
+            timeoutSeconds: 90
+            namespaces:
+              pid: host
+            env:
+              BLOCK_DEVICE: '{{ formatPartition (index .hardware.spec.storageDevices 0).name 1 }}'
+              FS_TYPE: vfat
+              IMAGE: quay.io/tinkerbell/actions/kexec
+              WAIT_SECONDS: "5"
+            volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+```
+
+Tinkerbell renders the Tasks' Go templates with `v1alpha2` data when the Workflow starts:
+
+| Expression | Value |
 |---|---|
-| `{{.device_1}}` | Worker device identifier (maps to `spec.instance.lookupID` from the Hardware, or `spec.agentID` when it has no lookupID) |
-| `{{ index .Hardware.Disks 0 }}` | First disk device path (e.g. `/dev/sda`), from `spec.storageDevices` |
-| `{{ formatPartition (index .Hardware.Disks 0) N }}` | Nth partition of the first disk |
+| `{{ (index .hardware.spec.storageDevices 0).name }}` | First disk device path (e.g. `/dev/sda`) |
+| `{{ formatPartition (index .hardware.spec.storageDevices 0).name N }}` | Nth partition of the first disk |
+| `{{ dig "spec" "instance" "userdata" "" .hardware }}` | The Hardware's user data, which CAPT sets to the machine's bootstrap data |
+| `{{ .metadata_url }}` | The metadata URL Tinkerbell is configured with |
+| `{{ .workflow.spec.globals.templateMap.device_1 }}` | The machine's Agent ID (the Hardware's `spec.instance.lookupID`, or `spec.agentID`) |
 
-**IMPORTANT:** Every `task` block in the template **must** include `worker: "{{.device_1}}"`. This
-is how Tinkerbell determines which device should execute the task. The value is resolved at
-workflow creation time from the Hardware's `spec.instance.lookupID` via the Workflow's
-`hardwareMap` (`v1alpha2`: `spec.globals.templateMap`).
+A Task does not name a worker: CAPT runs every entry on the machine's Hardware and Agent. If
+Tinkerbell cannot render a Task (for example, because it still uses `v1alpha1` syntax), CAPT
+records a `WorkflowNotRendered` warning on the `TinkerbellMachine` with Tinkerbell's reason.
+
+##### Boot options
+
+Each entry can carry `bootOptions`, as each task of a `v1alpha2` Workflow does: the boot mode
+and netboot toggle apply before that entry runs, and turning netboot off, ejecting the ISO and
+customboot `postOperations` apply after it succeeds.
+
+- **If any entry sets `bootOptions`**, every entry's are used exactly as written and entries
+  without get none. CAPT adds nothing: no netboot toggle, no BMC check, no ISO URL rewrite.
+  Template a per-machine ISO URL with Hardware data if you need one.
+- **If no entry sets them**, the first entry gets the boot options CAPT has always applied:
+  netboot toggled, plus the machine's `spec.bootOptions` boot mode when the Hardware has a BMC
+  (see [Boot modes](#boot-modes)). With several entries, the "after" steps then run after the
+  first one; set `bootOptions` on the entries to place them yourself. A `custombootConfig` with
+  template expressions is refused here (`TemplatedCustombootConfig`): its `v1alpha1` data would
+  render as `v1alpha2`.
+
+When the entries set boot options, `spec.bootOptions` is ignored, and CAPT records a
+`BootOptionsIgnored` warning if it is set.
+
+##### Task and template selection precedence
+
+When CAPT resolves what a machine runs, it evaluates these sources in order and uses the first
+one found, whatever its style:
+
+1. **`TinkerbellMachineTemplate.spec.template.spec.tasks`** (or the deprecated
+   `templateInline`/`templateRef`) — set directly in the CAPI manifest.
+2. **Hardware annotation `hardware.tinkerbell.org/capt-task-refs`** — comma-separated names of
+   Tasks in the Hardware's namespace, run in order with the default boot options. The
+   deprecated `hardware.tinkerbell.org/capt-template-override` names a `Template` instead; if
+   both are set, the Tasks win and CAPT records a `ConflictingHardwareAnnotations` warning.
+3. **`TinkerbellCluster.spec.tasks`** (or the deprecated `templateInline`/`templateRef`) —
+   applied to all machines that don't match a higher-priority source.
+
+If none of these sources provides Tasks or a template, the machine reconciliation fails with an
+error. A referenced Task that does not exist stops the machine before anything is created, with
+a `TaskNotFound` warning on the `TinkerbellMachine`.
+
+##### From templateInline to tasks
+
+`templateInline`, `templateRef` and the template override annotation are deprecated: the API
+server returns a warning when they are set, but they keep working exactly as before (see
+[How CAPT runs the template](#how-capt-runs-the-template)). To move a template to `tasks`,
+make each template task an entry with `taskInline`, and:
+
+| `v1alpha1` template | `taskInline` |
+|---|---|
+| `worker: "{{.device_1}}"` | remove it; CAPT assigns the Agent |
+| `timeout: 90` | `timeoutSeconds: 90` |
+| `environment:` | `env:` (values are strings: quote numbers and booleans) |
+| `pid: host` | `namespaces: {pid: host}` |
+| `command: [a, b, c]` | `command: a` and `args: [b, c]` |
+| `global_timeout` | none; use each action's `timeoutSeconds` |
+| `{{ index .Hardware.Disks 0 }}` | `{{ (index .hardware.spec.storageDevices 0).name }}` |
+| `{{ formatPartition (index .Hardware.Disks 0) 3 }}` | `{{ formatPartition (index .hardware.spec.storageDevices 0).name 3 }}` |
+| `{{ .Hardware.UserData }}` | `{{ dig "spec" "instance" "userdata" "" .hardware }}` |
+| `{{ .Hardware.Metadata.Instance.ID }}` | `{{ dig "spec" "instance" "lookupID" "" .hardware }}` |
+| `{{ .device_1 }}` (as a value) | `{{ .workflow.spec.globals.templateMap.device_1 }}` |
+
+Move the machine's `spec.bootOptions` onto the first entry as `bootOptions` with
+`toggleNetboot: true`, or leave it where it is and set no `bootOptions` on the entries. With the
+CABPT in-place update extension installed, changing `tasks`, the templates or `bootOptions` of a
+running machine does not roll it out: CAPT only reads them when it provisions a machine.
 
 ##### How CAPT runs the template
+
+This applies to the deprecated `templateInline`, `templateRef` and template override
+annotation only. A `tasks` list always runs natively, exactly as written.
 
 A `v1alpha2` Workflow runs Tasks, not a Template. For each machine CAPT converts the template
 the way Tinkerbell converts a `v1alpha1` Template (see Tinkerbell's
@@ -302,109 +463,9 @@ the way Tinkerbell converts a `v1alpha1` Template (see Tinkerbell's
   did before, and a Workflow that runs it, which Tinkerbell renders exactly as it rendered
   `v1alpha1` Workflows. CAPT records why on the Workflow (annotation
   `capt.tinkerbell.org/v1alpha1-compatibility`) and as an event on the `TinkerbellMachine`.
-  The example below runs natively: it converts to a single Task.
 
 Both modes provision the machine the same way; nothing needs to change in existing templates.
 A machine whose `Template` an earlier CAPT created keeps running it.
-
-##### Template selection precedence
-
-When CAPT resolves the template for a machine, it evaluates these sources in order
-and uses the first one found:
-
-1. **`TinkerbellMachineTemplate.spec.template.spec.templateInline`** (or `templateRef`) — machine-level template, set directly in the CAPI manifest.
-2. **Hardware annotation `hardware.tinkerbell.org/capt-template-override`** — set the annotation value to the name of an existing `Template` resource in the same namespace as the Hardware. This enables per-hardware template overrides without changing CAPI objects.
-3. **`TinkerbellCluster.spec.templateInline`** (or `templateRef`) — cluster-wide template applied to all machines that don't match a higher-priority source.
-
-If none of these sources provides a template, the machine reconciliation will fail with an error.
-
-Here is an example that streams an OS image to disk, configures cloud-init for the
-Tinkerbell metadata service, and kexecs into the installed OS:
-
-```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: TinkerbellMachineTemplate
-metadata:
-  name: capi-quickstart-control-plane
-  namespace: tink-system
-spec:
-  template:
-    spec:
-      bootOptions:
-        bootMode: netboot
-      hardwareAffinity:
-        required:
-        - labelSelector:
-            matchLabels:
-              tinkerbell.org/role: control-plane
-      templateInline: |
-        version: "0.1"
-        name: my-provisioning-template
-        global_timeout: 6000
-        tasks:
-          - name: "my-provisioning-template"
-            worker: "{{.device_1}}"
-            volumes:
-              - /dev:/dev
-            actions:
-              - name: "stream image"
-                image: quay.io/tinkerbell/actions/oci2disk
-                timeout: 1200
-                environment:
-                  # Replace 'amd64' with the target node architecture (amd64 or arm64)
-                  IMG_URL: ghcr.io/tinkerbell/cluster-api-provider-tinkerbell/ubuntu:2404-v1.35.2-amd64.gz
-                  DEST_DISK: {{ index .Hardware.Disks 0 }}
-                  COMPRESSED: true
-              - name: "add tink cloud-init config"
-                image: quay.io/tinkerbell/actions/writefile
-                timeout: 90
-                environment:
-                  DEST_DISK: {{ formatPartition ( index .Hardware.Disks 0 ) 3 }}
-                  FS_TYPE: ext4
-                  DEST_PATH: /etc/cloud/cloud.cfg.d/10_tinkerbell.cfg
-                  UID: 0
-                  GID: 0
-                  MODE: 0600
-                  DIRMODE: 0700
-                  CONTENTS: |
-                    datasource:
-                      Ec2:
-                        metadata_urls: ["http://<TINKERBELL_VIP>:7080"]
-                        strict_id: false
-                    system_info:
-                      default_user:
-                        name: tink
-                        groups: [wheel, adm]
-                        sudo: ["ALL=(ALL) NOPASSWD:ALL"]
-                        shell: /bin/bash
-                    manage_etc_hosts: localhost
-                    warnings:
-                      dsid_missing_source: off
-              - name: "add tink cloud-init ds-config"
-                image: quay.io/tinkerbell/actions/writefile
-                timeout: 90
-                environment:
-                  DEST_DISK: {{ formatPartition ( index .Hardware.Disks 0 ) 3 }}
-                  FS_TYPE: ext4
-                  DEST_PATH: /etc/cloud/ds-identify.cfg
-                  UID: 0
-                  GID: 0
-                  MODE: 0600
-                  DIRMODE: 0700
-                  CONTENTS: |
-                    datasource: Ec2
-              - name: "kexec image"
-                image: ghcr.io/jacobweinstock/waitdaemon:latest
-                timeout: 90
-                pid: host
-                environment:
-                  BLOCK_DEVICE: {{ formatPartition ( index .Hardware.Disks 0 ) 1 }}
-                  FS_TYPE: vfat
-                  IMAGE: quay.io/tinkerbell/actions/kexec
-                  WAIT_SECONDS: 5
-                volumes:
-                  - /var/run/docker.sock:/var/run/docker.sock
-```
 
 ##### Cloud-init integration
 

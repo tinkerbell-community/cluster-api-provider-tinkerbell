@@ -72,9 +72,11 @@ kind: TinkerbellCluster
 metadata:
   name: "${CLUSTER_NAME}"
 spec:
-  # A Tinkerbell Template is required for provisioning. Set templateInline with an
-  # inline template definition, or templateRef to reference an existing Template object.
-  # See docs/QUICK-START.md for examples and the template resolution order.
+  # Machines need Tinkerbell v1alpha2 Tasks to be provisioned. Set tasks here for every
+  # machine in the cluster, or on a TinkerbellMachineTemplate: an ordered list whose entries
+  # each define a Task inline (taskInline) or reference one (taskRef), with optional
+  # bootOptions. templateInline and templateRef still work but are deprecated.
+  # See docs/QUICK-START.md for an example and the resolution order.
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachineDeployment
@@ -114,6 +116,7 @@ metadata:
   name: ${CLUSTER_NAME}-worker-a
 spec:
   template:
+    # Set tasks here to give these machines their own Tasks instead of the cluster's.
     spec: {}
 ---
 kind: KubeadmConfigTemplate
