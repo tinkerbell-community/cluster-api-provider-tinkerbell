@@ -38,6 +38,17 @@ fork's API module (`github.com/tinkerbell-community/tinkerbell/api` v0.28.0, rep
 `github.com/tinkerbell/tinkerbell/api`) and uses its `conversion` package, so it maps the two
 versions exactly as Tinkerbell's conversion webhook does.
 
+CAPT's own API module (`github.com/tinkerbell/cluster-api-provider-tinkerbell/api`) embeds the
+fork's `v1alpha2` types in `tasks`, through the same `replace`. Go's `replace` directives only
+apply in the module being built, so a Go project that imports CAPT's API must add it too:
+
+```
+replace github.com/tinkerbell/tinkerbell/api => github.com/tinkerbell-community/tinkerbell/api v0.28.0
+```
+
+Upstream `github.com/tinkerbell/tinkerbell/api` v0.23.0 has no `v1alpha2` package, and v0.25.0
+has one without the types `tasks` uses (such as `Customboot`).
+
 | Object | API version | What CAPT does with it |
 |---|---|---|
 | `Hardware` | `tinkerbell.org/v1alpha2` | Selects and claims it (labels, finalizer), writes `spec.instance.userdata`, the IPAM address, and the provisioned annotation, all as merge patches of those fields only |

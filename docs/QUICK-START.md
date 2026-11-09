@@ -275,6 +275,8 @@ one of:
   access Tinkerbell's Policy gives Tasks, so put them in a Task you manage and use `taskRef`.
 - `taskRef`: an existing Task you manage (`name`, optional `namespace`, defaulting to the
   namespace the machine's Workflow is created in). CAPT never creates, changes or deletes it.
+  It cannot be a Task CAPT created for a machine (one labelled `capt.tinkerbell.org/machine-name`),
+  since CAPT deletes those with their machine (`TaskManagedByCAPT`).
 
 Inline Tasks and references can be mixed. CAPT creates one Workflow per machine that runs the
 entries in order on the machine's Hardware, so what you write maps one to one onto a `v1alpha2`
@@ -422,8 +424,10 @@ one found, whatever its style:
    applied to all machines that don't match a higher-priority source.
 
 If none of these sources provides Tasks or a template, the machine reconciliation fails with an
-error. A referenced Task that does not exist stops the machine before anything is created, with
-a `TaskNotFound` warning on the `TinkerbellMachine`.
+error. A problem with a referenced Task stops the machine before anything is created, with a
+warning on the `TinkerbellMachine`: `TaskNotFound` for each Task that does not exist,
+`TaskNotReadable` for one CAPT cannot read (for example outside the namespaces it watches), and
+`TaskManagedByCAPT` for one CAPT created for a machine.
 
 ##### From templateInline to tasks
 
