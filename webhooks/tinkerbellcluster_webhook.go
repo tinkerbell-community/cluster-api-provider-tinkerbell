@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -45,13 +46,22 @@ func (w *TinkerbellCluster) SetupWebhookWithManager(mgr ctrl.Manager) error {
 // +kubebuilder:webhook:verbs=create;update,path=/validate-infrastructure-cluster-x-k8s-io-v1beta2-tinkerbellcluster,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=tinkerbellclusters,versions=v1beta2,name=validation.tinkerbellcluster.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
 // ValidateCreate implements admission.Validator.
-func (w *TinkerbellCluster) ValidateCreate(_ context.Context, _ *infrastructurev1.TinkerbellCluster) (admission.Warnings, error) {
-	return nil, nil
+func (w *TinkerbellCluster) ValidateCreate(_ context.Context, obj *infrastructurev1.TinkerbellCluster) (admission.Warnings, error) {
+	return validateClusterSource(obj)
 }
 
 // ValidateUpdate implements admission.Validator.
-func (w *TinkerbellCluster) ValidateUpdate(_ context.Context, _, _ *infrastructurev1.TinkerbellCluster) (admission.Warnings, error) {
-	return nil, nil
+func (w *TinkerbellCluster) ValidateUpdate(_ context.Context, _, newTC *infrastructurev1.TinkerbellCluster) (admission.Warnings, error) {
+	return validateClusterSource(newTC)
+}
+
+// validateClusterSource checks what the cluster's machines provision from by default, and warns
+// about deprecated template fields.
+func validateClusterSource(tc *infrastructurev1.TinkerbellCluster) (admission.Warnings, error) {
+	path := field.NewPath("spec")
+
+	return deprecationWarnings(path, tc.Spec.TemplateInline, tc.Spec.TemplateRef),
+		aggregateObjErrors(tc.GroupVersionKind().GroupKind(), tc.Name, validateSource(path, tc.Spec.Tasks, tc.Spec.TemplateInline, tc.Spec.TemplateRef))
 }
 
 // ValidateDelete implements admission.Validator.

@@ -50,7 +50,7 @@ func (w *TinkerbellMachine) SetupWebhookWithManager(mgr ctrl.Manager) error {
 func (w *TinkerbellMachine) ValidateCreate(_ context.Context, obj *infrastructurev1.TinkerbellMachine) (admission.Warnings, error) {
 	allErrs := validateMachineSpec(&obj.Spec)
 
-	return nil, aggregateObjErrors(obj.GroupVersionKind().GroupKind(), obj.Name, allErrs)
+	return machineWarnings(&obj.Spec), aggregateObjErrors(obj.GroupVersionKind().GroupKind(), obj.Name, allErrs)
 }
 
 // ValidateUpdate implements admission.Validator.
@@ -71,7 +71,7 @@ func (w *TinkerbellMachine) ValidateUpdate(_ context.Context, old *infrastructur
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "addressFromPool"), "is immutable once hardware is selected"))
 	}
 
-	return nil, aggregateObjErrors(newTM.GroupVersionKind().GroupKind(), newTM.Name, allErrs)
+	return machineWarnings(&newTM.Spec), aggregateObjErrors(newTM.GroupVersionKind().GroupKind(), newTM.Name, allErrs)
 }
 
 // ValidateDelete implements admission.Validator.
@@ -94,5 +94,11 @@ func validateMachineSpec(spec *infrastructurev1.TinkerbellMachineSpec) field.Err
 		}
 	}
 
+	allErrs = append(allErrs, validateSource(fieldBasePath, spec.Tasks, spec.TemplateInline, spec.TemplateRef)...)
+
 	return allErrs
+}
+
+func machineWarnings(spec *infrastructurev1.TinkerbellMachineSpec) admission.Warnings {
+	return deprecationWarnings(field.NewPath("spec"), spec.TemplateInline, spec.TemplateRef)
 }

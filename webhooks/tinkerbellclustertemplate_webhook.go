@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -45,8 +46,8 @@ func (w *TinkerbellClusterTemplate) SetupWebhookWithManager(mgr ctrl.Manager) er
 // +kubebuilder:webhook:verbs=create;update,path=/validate-infrastructure-cluster-x-k8s-io-v1beta2-tinkerbellclustertemplate,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=tinkerbellclustertemplates,versions=v1beta2,name=validation.tinkerbellclustertemplate.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
 // ValidateCreate implements admission.Validator.
-func (w *TinkerbellClusterTemplate) ValidateCreate(_ context.Context, _ *infrastructurev1.TinkerbellClusterTemplate) (admission.Warnings, error) {
-	return nil, nil
+func (w *TinkerbellClusterTemplate) ValidateCreate(_ context.Context, obj *infrastructurev1.TinkerbellClusterTemplate) (admission.Warnings, error) {
+	return validateClusterTemplateSource(obj)
 }
 
 // ValidateUpdate implements admission.Validator. See validateTemplateSpecImmutable for what is
@@ -56,10 +57,24 @@ func (w *TinkerbellClusterTemplate) ValidateUpdate(
 	oldTCT *infrastructurev1.TinkerbellClusterTemplate,
 	newTCT *infrastructurev1.TinkerbellClusterTemplate,
 ) (admission.Warnings, error) {
-	return nil, validateTemplateSpecImmutable(
+	if err := validateTemplateSpecImmutable(
 		ctx, "TinkerbellClusterTemplate", newTCT,
 		oldTCT.Spec.Template.Spec, newTCT.Spec.Template.Spec,
-	)
+	); err != nil {
+		return nil, err
+	}
+
+	return validateClusterTemplateSource(newTCT)
+}
+
+// validateClusterTemplateSource checks what the machines of clusters stamped from tct provision
+// from by default, and warns about deprecated template fields.
+func validateClusterTemplateSource(tct *infrastructurev1.TinkerbellClusterTemplate) (admission.Warnings, error) {
+	path := field.NewPath("spec", "template", "spec")
+	spec := tct.Spec.Template.Spec
+
+	return deprecationWarnings(path, spec.TemplateInline, spec.TemplateRef),
+		aggregateObjErrors(tct.GroupVersionKind().GroupKind(), tct.Name, validateSource(path, spec.Tasks, spec.TemplateInline, spec.TemplateRef))
 }
 
 // ValidateDelete implements admission.Validator.

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -48,8 +49,8 @@ func (w *TinkerbellMachineTemplate) SetupWebhookWithManager(mgr ctrl.Manager) er
 // HardwareName and ProviderID are structurally prevented from appearing in templates
 // because TinkerbellMachineTemplateResource.Spec uses TinkerbellMachineConfig (which
 // does not include those fields) instead of TinkerbellMachineSpec.
-func (w *TinkerbellMachineTemplate) ValidateCreate(_ context.Context, _ *infrastructurev1.TinkerbellMachineTemplate) (admission.Warnings, error) {
-	return nil, nil
+func (w *TinkerbellMachineTemplate) ValidateCreate(_ context.Context, obj *infrastructurev1.TinkerbellMachineTemplate) (admission.Warnings, error) {
+	return validateMachineTemplateSource(obj)
 }
 
 // ValidateUpdate implements admission.Validator. See validateTemplateSpecImmutable for what is
@@ -59,10 +60,24 @@ func (w *TinkerbellMachineTemplate) ValidateUpdate(
 	oldTMT *infrastructurev1.TinkerbellMachineTemplate,
 	newTMT *infrastructurev1.TinkerbellMachineTemplate,
 ) (admission.Warnings, error) {
-	return nil, validateTemplateSpecImmutable(
+	if err := validateTemplateSpecImmutable(
 		ctx, "TinkerbellMachineTemplate", newTMT,
 		oldTMT.Spec.Template.Spec, newTMT.Spec.Template.Spec,
-	)
+	); err != nil {
+		return nil, err
+	}
+
+	return validateMachineTemplateSource(newTMT)
+}
+
+// validateMachineTemplateSource checks what the machines stamped from tmt provision from, and
+// warns about deprecated template fields.
+func validateMachineTemplateSource(tmt *infrastructurev1.TinkerbellMachineTemplate) (admission.Warnings, error) {
+	path := field.NewPath("spec", "template", "spec")
+	spec := tmt.Spec.Template.Spec
+
+	return deprecationWarnings(path, spec.TemplateInline, spec.TemplateRef),
+		aggregateObjErrors(tmt.GroupVersionKind().GroupKind(), tmt.Name, validateSource(path, spec.Tasks, spec.TemplateInline, spec.TemplateRef))
 }
 
 // ValidateDelete implements admission.Validator.
