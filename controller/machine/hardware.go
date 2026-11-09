@@ -38,8 +38,7 @@ const (
 	HardwareProvisionedAnnotation = "v1alpha1.tinkerbell.org/provisioned"
 
 	// HardwareTemplateOverrideAnnotation can be used to override the default Template used for provisioning.
-	//
-	// Deprecated: use HardwareTaskRefsAnnotation.
+	// It is deprecated; use HardwareTaskRefsAnnotation.
 	HardwareTemplateOverrideAnnotation = "hardware.tinkerbell.org/capt-template-override"
 
 	// HardwareTaskRefsAnnotation names the Tasks, comma separated and in the Hardware's

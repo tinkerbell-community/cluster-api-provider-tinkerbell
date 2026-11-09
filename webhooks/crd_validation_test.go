@@ -85,17 +85,52 @@ func TestCRDValidation(t *testing.T) {
 	c, err := client.New(cfg, client.Options{Scheme: scheme})
 	g.Expect(err).NotTo(HaveOccurred())
 
+	rejected := rejectedObjects()
+
+	for i, tt := range rejected {
+		t.Run("rejects "+tt.name, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			tt.obj.SetName(fmt.Sprintf("rejected-%d", i))
+			tt.obj.SetNamespace(metav1.NamespaceDefault)
+
+			err := c.Create(context.Background(), tt.obj)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(err.Error()).To(ContainSubstring(tt.want))
+		})
+	}
+
+	accepted := acceptedObjects()
+
+	for i, tt := range accepted {
+		t.Run("accepts "+tt.name, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			tt.obj.SetName(fmt.Sprintf("accepted-%d", i))
+			tt.obj.SetNamespace(metav1.NamespaceDefault)
+
+			g.Expect(c.Create(context.Background(), tt.obj)).To(Succeed())
+		})
+	}
+}
+
+// rejectedObject is an object the CRDs must refuse, with part of the reason.
+type rejectedObject struct {
+	name string
+	obj  client.Object
+	want string
+}
+
+func rejectedObjects() []rejectedObject {
 	bootISO := inlineEntry("a")
 	bootISO.BootOptions = &tinkv2.BootOptions{BootMode: "iso"}
 
 	both := inlineEntry("a")
 	both.TaskRef = &v1beta2.TaskRef{Name: "shared"}
 
-	rejected := []struct {
-		name string
-		obj  client.Object
-		want string
-	}{
+	return []rejectedObject{
 		{
 			name: "machine with tasks and templateInline",
 			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Tasks: []v1beta2.MachineTask{inlineEntry("a")}, TemplateInline: "t"}),
@@ -130,27 +165,18 @@ func TestCRDValidation(t *testing.T) {
 			want: "Unsupported value",
 		},
 	}
+}
 
-	for i, tt := range rejected {
-		t.Run("rejects "+tt.name, func(t *testing.T) {
-			t.Parallel()
-			g := NewWithT(t)
+// acceptedObject is an object the CRDs must take.
+type acceptedObject struct {
+	name string
+	obj  client.Object
+}
 
-			tt.obj.SetName(fmt.Sprintf("rejected-%d", i))
-			tt.obj.SetNamespace(metav1.NamespaceDefault)
-
-			err := c.Create(context.Background(), tt.obj)
-			g.Expect(err).To(HaveOccurred())
-			g.Expect(err.Error()).To(ContainSubstring(tt.want))
-		})
-	}
-
+func acceptedObjects() []acceptedObject {
 	mixed := []v1beta2.MachineTask{inlineEntry("install"), refEntry("cleanup", "shared")}
 
-	accepted := []struct {
-		name string
-		obj  client.Object
-	}{
+	return []acceptedObject{
 		{name: "machine with a mixed list", obj: machineWith(v1beta2.TinkerbellMachineConfig{Tasks: mixed})},
 		{
 			name: "machine template with a mixed list",
@@ -160,17 +186,5 @@ func TestCRDValidation(t *testing.T) {
 		},
 		{name: "cluster with a mixed list", obj: &v1beta2.TinkerbellCluster{Spec: v1beta2.TinkerbellClusterSpec{Tasks: mixed}}},
 		{name: "machine with templateInline only", obj: machineWith(v1beta2.TinkerbellMachineConfig{TemplateInline: "t"})},
-	}
-
-	for i, tt := range accepted {
-		t.Run("accepts "+tt.name, func(t *testing.T) {
-			t.Parallel()
-			g := NewWithT(t)
-
-			tt.obj.SetName(fmt.Sprintf("accepted-%d", i))
-			tt.obj.SetNamespace(metav1.NamespaceDefault)
-
-			g.Expect(c.Create(context.Background(), tt.obj)).To(Succeed())
-		})
 	}
 }

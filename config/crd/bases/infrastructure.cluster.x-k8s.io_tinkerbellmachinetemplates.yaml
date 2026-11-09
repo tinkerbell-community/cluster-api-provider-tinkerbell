@@ -1583,8 +1583,7 @@ spec:
                           TemplateInline is an inline Tinkerbell Template definition for this machine.
                           Takes precedence over hardware annotations and cluster-level templates.
                           Mutually exclusive with Tasks and TemplateRef.
-
-                          Deprecated: use tasks.
+                          This field is deprecated; use tasks.
                         type: string
                       templateRef:
                         description: |-
@@ -1592,8 +1591,7 @@ spec:
                           be used as the template for this machine. Takes precedence over hardware annotations and
                           cluster-level templates. Mutually exclusive with Tasks and TemplateInline.
                           When Namespace is omitted, defaults to the Hardware's namespace.
-
-                          Deprecated: use tasks.
+                          This field is deprecated; use tasks.
                         properties:
                           name:
                             description: Name is the name of the object.

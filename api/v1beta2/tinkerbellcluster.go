@@ -63,8 +63,7 @@ type TinkerbellClusterSpec struct {
 	// TemplateInline is an inline Tinkerbell Template definition applied to all machines in the
 	// cluster. If a Machine specifies its own template, the Machine's template takes precedence.
 	// Mutually exclusive with Tasks and TemplateRef.
-	//
-	// Deprecated: use tasks.
+	// This field is deprecated; use tasks.
 	//
 	// +optional
 	TemplateInline string `json:"templateInline,omitempty"`
@@ -73,8 +72,7 @@ type TinkerbellClusterSpec struct {
 	// be used as the template for all machines in the cluster. If a Machine specifies its own
 	// template, the Machine's template takes precedence. Mutually exclusive with Tasks and
 	// TemplateInline. When Namespace is omitted, defaults to the Hardware's namespace.
-	//
-	// Deprecated: use tasks.
+	// This field is deprecated; use tasks.
 	//
 	// +optional
 	TemplateRef *ObjectRef `json:"templateRef,omitempty"`

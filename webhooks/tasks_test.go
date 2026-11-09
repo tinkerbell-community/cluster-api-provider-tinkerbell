@@ -28,9 +28,10 @@ import (
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 )
 
-func inline(name string) infrastructurev1.MachineTask {
+// inline is a tasks entry named "a" with an inline Task.
+func inline() infrastructurev1.MachineTask {
 	return infrastructurev1.MachineTask{
-		Name:       name,
+		Name:       "a",
 		TaskInline: &tinkv2.TaskSpec{Actions: []tinkv2.Action{{Name: "a", Image: "alpine"}}},
 	}
 }
@@ -40,7 +41,7 @@ func ref(name string) infrastructurev1.MachineTask {
 }
 
 func errorTypes(errs field.ErrorList) []field.ErrorType {
-	var types []field.ErrorType
+	types := make([]field.ErrorType, 0, len(errs))
 	for _, err := range errs {
 		types = append(types, err.Type)
 	}
@@ -51,7 +52,7 @@ func errorTypes(errs field.ErrorList) []field.ErrorType {
 func Test_validateSource(t *testing.T) {
 	t.Parallel()
 
-	both := inline("a")
+	both := inline()
 	both.TaskRef = &infrastructurev1.TaskRef{Name: "shared"}
 
 	for _, tt := range []struct {
@@ -62,17 +63,17 @@ func Test_validateSource(t *testing.T) {
 		want           []field.ErrorType
 	}{
 		{name: "no source"},
-		{name: "tasks only", tasks: []infrastructurev1.MachineTask{inline("a"), ref("b")}},
+		{name: "tasks only", tasks: []infrastructurev1.MachineTask{inline(), ref("b")}},
 		{name: "templateInline only", templateInline: "t"},
 		{
 			name:           "tasks and templateInline",
-			tasks:          []infrastructurev1.MachineTask{inline("a")},
+			tasks:          []infrastructurev1.MachineTask{inline()},
 			templateInline: "t",
 			want:           []field.ErrorType{field.ErrorTypeForbidden},
 		},
 		{
 			name:        "tasks and templateRef",
-			tasks:       []infrastructurev1.MachineTask{inline("a")},
+			tasks:       []infrastructurev1.MachineTask{inline()},
 			templateRef: &infrastructurev1.ObjectRef{Name: "t"},
 			want:        []field.ErrorType{field.ErrorTypeForbidden},
 		},
@@ -88,7 +89,7 @@ func Test_validateSource(t *testing.T) {
 		},
 		{
 			name:  "duplicate names",
-			tasks: []infrastructurev1.MachineTask{inline("a"), ref("a")},
+			tasks: []infrastructurev1.MachineTask{inline(), ref("a")},
 			want:  []field.ErrorType{field.ErrorTypeDuplicate},
 		},
 	} {
@@ -97,6 +98,12 @@ func Test_validateSource(t *testing.T) {
 			g := NewWithT(t)
 
 			errs := validateSource(field.NewPath("spec"), tt.tasks, tt.templateInline, tt.templateRef)
+			if len(tt.want) == 0 {
+				g.Expect(errs).To(BeEmpty())
+
+				return
+			}
+
 			g.Expect(errorTypes(errs)).To(Equal(tt.want), "%v", errs)
 		})
 	}
@@ -172,7 +179,7 @@ func Test_webhooks_reject_two_sources(t *testing.T) {
 	t.Parallel()
 
 	config := infrastructurev1.TinkerbellMachineConfig{
-		Tasks:          []infrastructurev1.MachineTask{inline("a")},
+		Tasks:          []infrastructurev1.MachineTask{inline()},
 		TemplateInline: "t",
 	}
 
