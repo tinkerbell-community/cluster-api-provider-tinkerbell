@@ -50,26 +50,36 @@ func validateSource(path *field.Path, tasks []infrastructurev1.MachineTask, temp
 	for i, task := range tasks {
 		entry := path.Child("tasks").Index(i)
 
-		if (task.TaskRef != nil) == (task.TaskInline != nil) {
-			errs = append(errs, field.Invalid(entry, task.Name, "exactly one of taskRef and taskInline must be set"))
-		}
-
-		if task.TaskRef != nil && task.TaskRef.Name == "" {
-			errs = append(errs, field.Required(entry.Child("taskRef", "name"), "a taskRef names the Task it runs"))
-		}
-
-		// A Task's references read other objects with the access Tinkerbell's Policy gives
-		// Tasks; CAPT does not create them for whoever can write a machine.
-		if task.TaskInline != nil && len(task.TaskInline.References) > 0 {
-			errs = append(errs, field.Forbidden(entry.Child("taskInline", "references"),
-				"taskInline cannot set references; reference a Task you manage with taskRef instead"))
-		}
+		errs = append(errs, validateTask(entry, task)...)
 
 		if seen[task.Name] {
 			errs = append(errs, field.Duplicate(entry.Child("name"), task.Name))
 		}
 
 		seen[task.Name] = true
+	}
+
+	return errs
+}
+
+// validateTask checks one tasks entry at path: exactly one of taskRef and taskInline, a named
+// taskRef, and no references in an inline Task.
+func validateTask(path *field.Path, task infrastructurev1.MachineTask) field.ErrorList {
+	var errs field.ErrorList
+
+	if (task.TaskRef != nil) == (task.TaskInline != nil) {
+		errs = append(errs, field.Invalid(path, task.Name, "exactly one of taskRef and taskInline must be set"))
+	}
+
+	if task.TaskRef != nil && task.TaskRef.Name == "" {
+		errs = append(errs, field.Required(path.Child("taskRef", "name"), "a taskRef names the Task it runs"))
+	}
+
+	// A Task's references read other objects with the access Tinkerbell's Policy gives
+	// Tasks; CAPT does not create them for whoever can write a machine.
+	if task.TaskInline != nil && len(task.TaskInline.References) > 0 {
+		errs = append(errs, field.Forbidden(path.Child("taskInline", "references"),
+			"taskInline cannot set references; reference a Task you manage with taskRef instead"))
 	}
 
 	return errs
