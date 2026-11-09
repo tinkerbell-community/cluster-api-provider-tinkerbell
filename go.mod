@@ -92,4 +92,4 @@ require (
 
 replace github.com/tinkerbell/cluster-api-provider-tinkerbell/api => ./api
 
-replace github.com/tinkerbell/tinkerbell/api => github.com/tinkerbell-community/tinkerbell/api v0.28.0
+replace github.com/tinkerbell/tinkerbell/api => github.com/tinkerbell-community/tinkerbell/api v0.28.1

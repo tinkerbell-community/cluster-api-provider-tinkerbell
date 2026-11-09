@@ -41,4 +41,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace github.com/tinkerbell/tinkerbell/api => github.com/tinkerbell-community/tinkerbell/api v0.28.0
+replace github.com/tinkerbell/tinkerbell/api => github.com/tinkerbell-community/tinkerbell/api v0.28.1

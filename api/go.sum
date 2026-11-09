@@ -58,8 +58,8 @@ github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/tinkerbell-community/tinkerbell/api v0.28.0 h1:bEZv+R6/HfOHKafpLunsjnOpKrg5Y5ovMyjvlNgToQA=
-github.com/tinkerbell-community/tinkerbell/api v0.28.0/go.mod h1:c6Ff5nUkifa5M6WLNFSDhMa1nLSs3ua55ZKfd29yBV4=
+github.com/tinkerbell-community/tinkerbell/api v0.28.1 h1:sHAH4OAWqHdBXcS/FsisgGhfVzChjjbxLLwtGp6UCgE=
+github.com/tinkerbell-community/tinkerbell/api v0.28.1/go.mod h1:c6Ff5nUkifa5M6WLNFSDhMa1nLSs3ua55ZKfd29yBV4=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 go.yaml.in/yaml/v2 v2.4.3 h1:6gvOSjQoTB3vt1l+CU+tSyi/HOjfOjRLJ4YwYZGwRO0=

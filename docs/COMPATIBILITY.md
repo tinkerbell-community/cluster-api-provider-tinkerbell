@@ -28,6 +28,7 @@ Machines provisioned from `tasks` never need the Template CRD.
 
 | CAPT | Tinkerbell (tinkerbell-community) |
 | ---- | --------------------------------- |
+| v0.10.1 | v0.27.0 or later (tested with v0.28.7); same as v0.10.0, built against API module v0.28.1, whose conversion takes `dhcp.uefi` from `spec.bmc.bootMode` as Tinkerbell v0.28.7 does |
 | v0.10.0 | v0.27.0 or later (tested with v0.28.6); adds `tasks`, which needs Tinkerbell's `v1alpha2` Task CRD |
 | v0.9.2 | v0.27.0 or later; needed for a Tinkerbell without the Template CRD |
 | v0.9.1 | v0.27.0 or later |
@@ -35,7 +36,7 @@ Machines provisioned from `tasks` never need the Template CRD.
 | v0.8.x and earlier | any release that serves `v1alpha1` (v0.27 and v0.28 do) |
 
 CAPT builds against the
-fork's API module (`github.com/tinkerbell-community/tinkerbell/api` v0.28.0, replacing
+fork's API module (`github.com/tinkerbell-community/tinkerbell/api` v0.28.1, replacing
 `github.com/tinkerbell/tinkerbell/api`) and uses its `conversion` package, so it maps the two
 versions exactly as Tinkerbell's conversion webhook does.
 
@@ -44,7 +45,7 @@ fork's `v1alpha2` types in `tasks`, through the same `replace`. Go's `replace` d
 apply in the module being built, so a Go project that imports CAPT's API must add it too:
 
 ```
-replace github.com/tinkerbell/tinkerbell/api => github.com/tinkerbell-community/tinkerbell/api v0.28.0
+replace github.com/tinkerbell/tinkerbell/api => github.com/tinkerbell-community/tinkerbell/api v0.28.1
 ```
 
 Upstream `github.com/tinkerbell/tinkerbell/api` v0.23.0 has no `v1alpha2` package, and v0.25.0
