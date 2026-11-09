@@ -11,6 +11,7 @@ import (
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
@@ -176,6 +177,10 @@ func (scope *machineReconcileScope) reconcileIPAM(hw *tinkv2.Hardware) error {
 		msg := fmt.Sprintf("IPAddressClaim %s is being deleted; not replacing it while the machine may be using its address", claim.Name)
 		if !metav1.IsControlledBy(claim, scope.tinkerbellMachine) {
 			msg = fmt.Sprintf("IPAddressClaim %s left by a previous machine on this hardware is still being released", claim.Name)
+
+			if err := scope.releaseOrphanedIPAddressClaim(claim); err != nil {
+				return err
+			}
 		}
 
 		scope.setIPAddressClaimedCondition(metav1.ConditionFalse, infrastructurev1.IPAddressClaimDeletingReason, msg)
@@ -433,6 +438,66 @@ func (scope *machineReconcileScope) ensureHardwareAddress(hw *tinkv2.Hardware, m
 	scope.log.Info("reserved IPAM address on hardware", "hardware", hw.Name, "mac", mac, "address", ip.address)
 
 	return nil
+}
+
+// releaseOrphanedIPAddressClaim takes CAPT's finalizer off a deleting claim whose controlling
+// TinkerbellMachine no longer exists. Only that machine releases its claim, on its own deletion,
+// and it finds the claim by its current Hardware: one that went away without releasing it (it
+// had lost its Hardware to another machine, or its finalizer was removed by hand) would leave
+// the claim held by CAPT forever, and every later machine on the Hardware waiting for it. The
+// IPAM provider's own finalizer, if any, still runs.
+func (scope *machineReconcileScope) releaseOrphanedIPAddressClaim(claim *ipamv1.IPAddressClaim) error {
+	if !controllerutil.ContainsFinalizer(claim, infrastructurev1.IPAddressClaimFinalizer) {
+		return nil
+	}
+
+	gone, err := scope.claimOwnerGone(claim)
+	if err != nil || !gone {
+		return err
+	}
+
+	base := claim.DeepCopy()
+	controllerutil.RemoveFinalizer(claim, infrastructurev1.IPAddressClaimFinalizer)
+
+	// Optimistic lock: the provider edits the same finalizer list, and a merge patch replaces
+	// it wholesale.
+	if err := scope.client.Patch(scope.ctx, claim, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("removing finalizer from IPAddressClaim %s of a removed machine: %w", claim.Name, err)
+	}
+
+	scope.log.Info("released IPAddressClaim of a machine that no longer exists", "claim", claim.Name)
+
+	return nil
+}
+
+// claimOwnerGone reports whether claim's controlling TinkerbellMachine no longer exists: it is
+// not found, or its name now belongs to another machine. A claim controlled by anything else
+// is not CAPT's to judge.
+func (scope *machineReconcileScope) claimOwnerGone(claim *ipamv1.IPAddressClaim) (bool, error) {
+	owner := metav1.GetControllerOf(claim)
+	if owner == nil || owner.Kind != "TinkerbellMachine" || !isInfrastructureAPIVersion(owner.APIVersion) {
+		return false, nil
+	}
+
+	machine := &infrastructurev1.TinkerbellMachine{}
+
+	err := scope.client.Get(scope.ctx, types.NamespacedName{Namespace: claim.Namespace, Name: owner.Name}, machine)
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("getting the TinkerbellMachine that owns IPAddressClaim %s: %w", claim.Name, err)
+	}
+
+	return machine.UID != owner.UID, nil
+}
+
+// isInfrastructureAPIVersion reports whether apiVersion is in CAPT's API group.
+func isInfrastructureAPIVersion(apiVersion string) bool {
+	gv, err := schema.ParseGroupVersion(apiVersion)
+
+	return err == nil && gv.Group == infrastructurev1.GroupVersion.Group
 }
 
 // releaseIPAddressClaim hands the machine's address back: CAPT's finalizer comes off the claim

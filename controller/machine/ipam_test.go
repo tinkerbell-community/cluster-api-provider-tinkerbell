@@ -810,7 +810,7 @@ func Test_reconcileIPAM_waits_for_a_previous_machines_terminating_claim(t *testi
 	previous.UID = ipamOtherMachineUID
 	claim := ownedClaim(previous, hw, ipamMAC)
 	claim.Finalizers = append(claim.Finalizers, "ipam.example.org/release")
-	scope, cl := ipamScope(g, machine, hw, claim)
+	scope, cl := ipamScope(g, machine, hw, claim, previous)
 
 	// The provider's finalizer keeps the previous machine's claim around for a while.
 	g.Expect(cl.Delete(context.Background(), claim)).To(Succeed())
@@ -818,6 +818,73 @@ func Test_reconcileIPAM_waits_for_a_previous_machines_terminating_claim(t *testi
 	err := scope.reconcileIPAM(hw)
 	g.Expect(err).To(MatchError(errWaitingForIPAddress), "machine replacement on the same hardware is a wait, not a conflict")
 	g.Expect(conditions.GetReason(machine, infrastructurev1.IPAddressClaimedCondition)).To(Equal(infrastructurev1.IPAddressClaimDeletingReason))
+
+	// The previous machine still exists and releases the claim itself.
+	got := &ipamv1.IPAddressClaim{}
+	g.Expect(cl.Get(context.Background(), client.ObjectKeyFromObject(claim), got)).To(Succeed())
+	g.Expect(got.Finalizers).To(ContainElement(infrastructurev1.IPAddressClaimFinalizer))
+}
+
+// A previous machine that went away without releasing its claim leaves CAPT's finalizer on it
+// for good, and the next machine on the Hardware would wait forever. The finalizer comes off;
+// the provider's finalizer, still running, keeps the machine waiting until the address is back.
+func Test_reconcileIPAM_releases_the_terminating_claim_of_a_removed_machine(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	machine := ipamMachine()
+	hw := ipamHardwareObject(ipamMAC)
+	previous := ipamMachine()
+	previous.Name = "previous-machine"
+	previous.UID = ipamOtherMachineUID
+	claim := ownedClaim(previous, hw, ipamMAC)
+	claim.Finalizers = append(claim.Finalizers, "ipam.example.org/release")
+	scope, cl := ipamScope(g, machine, hw, claim)
+
+	g.Expect(cl.Delete(context.Background(), claim)).To(Succeed())
+
+	err := scope.reconcileIPAM(hw)
+	g.Expect(err).To(MatchError(errWaitingForIPAddress))
+
+	got := &ipamv1.IPAddressClaim{}
+	g.Expect(cl.Get(context.Background(), client.ObjectKeyFromObject(claim), got)).To(Succeed())
+	g.Expect(got.Finalizers).To(ConsistOf("ipam.example.org/release"))
+}
+
+// The previous machine's name may already belong to a new machine; the claim's owner is gone all
+// the same. With CAPT's finalizer the last one, the claim goes and the next reconcile makes this
+// machine's own.
+func Test_reconcileIPAM_releases_a_claim_whose_owner_name_was_reused(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	machine := ipamMachine()
+	hw := ipamHardwareObject(ipamMAC)
+	previous := ipamMachine()
+	previous.Name = "previous-machine"
+	previous.UID = ipamOtherMachineUID
+	claim := ownedClaim(previous, hw, ipamMAC)
+	claim.Finalizers = append(claim.Finalizers, "ipam.example.org/release")
+	reused := ipamMachine()
+	reused.Name = previous.Name
+	reused.UID = "33333333-3333-3333-3333-333333333333"
+	reused.Spec.HardwareName = "other-hardware"
+	scope, cl := ipamScope(g, machine, hw, claim, reused)
+
+	g.Expect(cl.Delete(context.Background(), claim)).To(Succeed())
+	// The provider is done with it.
+	pending := &ipamv1.IPAddressClaim{}
+	g.Expect(cl.Get(context.Background(), client.ObjectKeyFromObject(claim), pending)).To(Succeed())
+	controllerutil.RemoveFinalizer(pending, "ipam.example.org/release")
+	g.Expect(cl.Update(context.Background(), pending)).To(Succeed())
+
+	g.Expect(scope.reconcileIPAM(hw)).To(MatchError(errWaitingForIPAddress))
+	g.Expect(cl.Get(context.Background(), client.ObjectKeyFromObject(claim), &ipamv1.IPAddressClaim{})).NotTo(Succeed(), "the claim should be gone")
+
+	g.Expect(scope.reconcileIPAM(hw)).To(MatchError(errWaitingForIPAddress))
+	mine := &ipamv1.IPAddressClaim{}
+	g.Expect(cl.Get(context.Background(), client.ObjectKeyFromObject(claim), mine)).To(Succeed())
+	g.Expect(metav1.IsControlledBy(mine, machine)).To(BeTrue(), "the machine should own the new claim")
 }
 
 func Test_releaseHardware_ignores_the_mac_recorded_on_a_foreign_claim(t *testing.T) {
