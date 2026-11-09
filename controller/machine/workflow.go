@@ -149,6 +149,11 @@ func (scope *machineReconcileScope) newWorkflow(hw *tinkv2.Hardware) (*tinkv2.Wo
 // creates the v1alpha1 Template and the converted Workflow, which Tinkerbell runs in v1alpha1
 // compatibility mode exactly as it ran the v1alpha1 Workflow, and records why.
 func (scope *machineReconcileScope) createWorkflow(hw *tinkv2.Hardware) error {
+	// A machine provisioned from a Task list never takes the template path below.
+	if tasks, origin := scope.taskSource(hw); len(tasks) > 0 {
+		return scope.createTaskWorkflow(hw, tasks, origin)
+	}
+
 	wf, err := scope.newWorkflow(hw)
 	if err != nil {
 		return err

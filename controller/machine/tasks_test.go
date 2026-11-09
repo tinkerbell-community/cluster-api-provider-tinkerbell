@@ -26,6 +26,9 @@ import (
 	tinkv1 "github.com/tinkerbell/tinkerbell/api/v1alpha1/tinkerbell"
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	rufiov2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell/bmc"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
@@ -68,8 +71,13 @@ func Test_hardwareTaskRefs(t *testing.T) {
 			}
 
 			got := hardwareTaskRefs(hw)
+			if len(tt.want) == 0 {
+				g.Expect(got).To(BeEmpty())
 
-			var names []string
+				return
+			}
+
+			names := make([]string, 0, len(got))
 
 			for _, task := range got {
 				g.Expect(task.TaskRef).NotTo(BeNil())
@@ -258,4 +266,199 @@ func Test_taskBootOptions_default_refuses_templated_customboot(t *testing.T) {
 
 	_, err := scope.taskBootOptions(hw, []infrastructurev1.MachineTask{inlineTask("a")})
 	g.Expect(errors.Is(err, ErrTemplatedCustombootConfig)).To(BeTrue(), "got %v", err)
+}
+
+// sharedTask is a Task the user manages, which CAPT only references.
+func sharedTask(name, namespace string) *tinkv2.Task {
+	return &tinkv2.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       tinkv2.TaskSpec{Actions: []tinkv2.Action{{Name: "shared", Image: "alpine"}}},
+	}
+}
+
+// taskRefs returns the Task references of wf's tasks, in order.
+func taskRefs(wf *tinkv2.Workflow) []tinkv2.SimpleReference {
+	refs := make([]tinkv2.SimpleReference, 0, len(wf.Spec.Tasks))
+	for _, task := range wf.Spec.Tasks {
+		refs = append(refs, task.TaskRef)
+	}
+
+	return refs
+}
+
+func Test_createWorkflow_runs_inline_tasks(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	scope := workflowTestScope(g, "", hw)
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("install")}
+
+	g.Expect(scope.createWorkflow(hw)).To(Succeed())
+
+	task := &tinkv2.Task{}
+	g.Expect(scope.tinkerbellClient.Get(scope.ctx, types.NamespacedName{Name: "machine-1-install", Namespace: wfNamespace}, task)).To(Succeed())
+	expectOwnedByMachine(g, scope, task)
+	g.Expect(task.Spec).To(Equal(*inlineTask("install").TaskInline))
+
+	wf := getWorkflow(g, scope)
+	expectOwnedByMachine(g, scope, wf)
+	g.Expect(wf.Annotations).NotTo(HaveKey(AnnotationCompatibilityMode))
+	g.Expect(wf.Spec.Tasks).To(HaveLen(1))
+	g.Expect(wf.Spec.Tasks[0].TaskRef).To(Equal(tinkv2.SimpleReference{Name: "machine-1-install", Namespace: wfNamespace}))
+	g.Expect(wf.Spec.Tasks[0].AgentID).To(Equal(wfAgent))
+	g.Expect(wf.Spec.Tasks[0].Hardware.HardwareRef).To(Equal(&tinkv2.SimpleReference{Name: wfHardware, Namespace: wfNamespace}))
+	g.Expect(wf.Spec.Tasks[0].Hardware.BootOptions).To(Equal(&tinkv2.BootOptions{ToggleNetboot: true}))
+	g.Expect(wf.Spec.Globals.TemplateMap).To(HaveKeyWithValue("device_1", wfAgent))
+
+	exists, err := scope.templateExists()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(exists).To(BeFalse(), "a machine running Tasks gets no v1alpha1 Template")
+}
+
+func Test_createWorkflow_runs_a_mixed_list_in_order(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	shared := sharedTask("shared", wfNamespace)
+	scope := workflowTestScope(g, "", hw, shared)
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{
+		inlineTask("a"), refTask("shared", "shared"), inlineTask("b"),
+	}
+
+	g.Expect(scope.createWorkflow(hw)).To(Succeed())
+
+	g.Expect(taskRefs(getWorkflow(g, scope))).To(Equal([]tinkv2.SimpleReference{
+		{Name: "machine-1-a", Namespace: wfNamespace},
+		{Name: "shared", Namespace: wfNamespace},
+		{Name: "machine-1-b", Namespace: wfNamespace},
+	}))
+
+	g.Expect(scope.removeDependencies()).To(Succeed())
+
+	remaining := listTasks(g, scope)
+	g.Expect(remaining).To(HaveLen(1), "the inline Tasks go with the machine")
+	g.Expect(remaining[0].Name).To(Equal("shared"))
+	g.Expect(remaining[0].Labels).To(BeEmpty(), "a referenced Task is never labelled")
+	g.Expect(remaining[0].Spec).To(Equal(shared.Spec), "a referenced Task is never changed")
+}
+
+func Test_createTaskWorkflow_missing_ref_creates_nothing(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	scope := workflowTestScope(g, "", hw)
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a"), refTask("missing", "missing")}
+
+	err := scope.createWorkflow(hw)
+	g.Expect(errors.Is(err, ErrTaskNotFound)).To(BeTrue(), "got %v", err)
+	g.Expect(err.Error()).To(ContainSubstring("tink/missing"))
+
+	g.Expect(listTasks(g, scope)).To(BeEmpty())
+	g.Expect(apierrors.IsNotFound(scope.tinkerbellClient.Get(scope.ctx, machineKey(), &tinkv2.Workflow{}))).To(BeTrue())
+}
+
+func Test_createTaskWorkflow_conflicting_task(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	scope := workflowTestScope(g, "", hw, sharedTask("machine-1-a", wfNamespace))
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a")}
+
+	err := scope.createWorkflow(hw)
+	g.Expect(errors.Is(err, ErrTaskConflict)).To(BeTrue(), "got %v", err)
+	g.Expect(apierrors.IsNotFound(scope.tinkerbellClient.Get(scope.ctx, machineKey(), &tinkv2.Workflow{}))).To(BeTrue())
+}
+
+func Test_createWorkflow_tasks_ignore_a_stale_template(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	stale := &tinkv1.Template{
+		ObjectMeta: metav1.ObjectMeta{Name: wfMachine, Namespace: wfNamespace},
+		Spec:       tinkv1.TemplateSpec{Data: ptr.To(talosTemplate)},
+	}
+	scope := workflowTestScope(g, "", hw, stale)
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a")}
+
+	g.Expect(scope.createWorkflow(hw)).To(Succeed())
+
+	wf := getWorkflow(g, scope)
+	g.Expect(wf.Annotations).NotTo(HaveKey(AnnotationCompatibilityMode))
+	g.Expect(taskRefs(wf)).To(Equal([]tinkv2.SimpleReference{{Name: "machine-1-a", Namespace: wfNamespace}}))
+}
+
+func Test_createWorkflow_tasks_from_the_cluster_and_annotation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("cluster", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		hw := workflowTestHardware(false)
+		scope := workflowTestScope(g, "", hw)
+		scope.tinkerbellCluster.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a")}
+
+		g.Expect(scope.createWorkflow(hw)).To(Succeed())
+		g.Expect(taskRefs(getWorkflow(g, scope))).To(Equal([]tinkv2.SimpleReference{{Name: "machine-1-a", Namespace: wfNamespace}}))
+	})
+
+	t.Run("hardware annotation", func(t *testing.T) {
+		t.Parallel()
+		g := NewWithT(t)
+
+		hw := workflowTestHardware(true)
+		hw.Annotations = map[string]string{HardwareTaskRefsAnnotation: "shared"}
+		scope := workflowTestScope(g, "", hw, sharedTask("shared", wfNamespace))
+		scope.tinkerbellMachine.Spec.BootOptions = infrastructurev1.BootOptions{BootMode: tinkv1.BootModeNetboot}
+
+		g.Expect(scope.createWorkflow(hw)).To(Succeed())
+
+		wf := getWorkflow(g, scope)
+		g.Expect(taskRefs(wf)).To(Equal([]tinkv2.SimpleReference{{Name: "shared", Namespace: wfNamespace}}))
+		g.Expect(wf.Spec.Tasks[0].Hardware.BootOptions).To(Equal(&tinkv2.BootOptions{ToggleNetboot: true, BootMode: tinkv2.BootModeNetboot}))
+	})
+}
+
+func Test_createTaskWorkflow_uses_the_tinkerbell_client(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	scope := workflowTestScope(g, "")
+	scope.tinkerbellClient = newHardwareTestClient(g, hw, sharedTask("shared", wfNamespace))
+	scope.externalTinkerbell = true
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a"), refTask("shared", "shared")}
+
+	g.Expect(scope.createWorkflow(hw)).To(Succeed())
+
+	g.Expect(getWorkflow(g, scope).Spec.Tasks).To(HaveLen(2))
+	g.Expect(listTasks(g, scope)).To(HaveLen(2))
+
+	managementTasks := &tinkv2.TaskList{}
+	g.Expect(scope.client.List(scope.ctx, managementTasks)).To(Succeed())
+	g.Expect(managementTasks.Items).To(BeEmpty())
+	g.Expect(apierrors.IsNotFound(scope.client.Get(scope.ctx, machineKey(), &tinkv2.Workflow{}))).To(BeTrue())
+}
+
+func Test_reconcile_reports_a_workflow_that_does_not_render(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	wf := &tinkv2.Workflow{ObjectMeta: metav1.ObjectMeta{Name: wfMachine, Namespace: wfNamespace}}
+	wf.Status.SetCondition(tinkv2.WorkflowCondition{
+		Type:    tinkv2.TemplateRenderedSuccess,
+		Status:  metav1.ConditionFalse,
+		Message: "boom",
+	})
+	scope := workflowTestScope(g, "", hw, wf)
+
+	err := scope.reconcile(hw)
+	g.Expect(errors.Is(err, errWorkflowNotRendered)).To(BeTrue(), "got %v", err)
+	g.Expect(err.Error()).To(ContainSubstring("boom"))
 }

@@ -105,6 +105,7 @@ func TestTinkerbellCRDs(t *testing.T) {
 		"isoboot":    testBootOptionsCRDs(infrastructurev1.BootOptions{BootMode: tinkv1.BootModeIsoboot, ISOURL: "http://smee:7171/iso/hook.iso"}),
 		"customboot": testBootOptionsCRDs(customboot()),
 		"bmc":        testBMCJobCRDs,
+		"tasks":      testTaskWorkflowCRDs,
 		"hardware":   testHardwareWritesCRDs,
 	} {
 		g.Expect(tinkerbell.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})).To(Succeed())
@@ -187,6 +188,42 @@ func testNativeWorkflowCRDs(t *testing.T, tinkerbell client.Client, namespace st
 	tasks := &tinkv2.TaskList{}
 	g.Expect(tinkerbell.List(scope.ctx, tasks, client.InNamespace(namespace))).To(Succeed())
 	g.Expect(tasks.Items).To(BeEmpty())
+}
+
+// testTaskWorkflowCRDs creates a Workflow from a mixed tasks list with boot options on both
+// entries, so the Tinkerbell schema must accept the inline Task and per-task boot options.
+func testTaskWorkflowCRDs(t *testing.T, tinkerbell client.Client, namespace string) {
+	t.Helper()
+	g := NewWithT(t)
+
+	hw := envtestHardware(g, tinkerbell, namespace)
+	g.Expect(tinkerbell.Create(context.Background(), sharedTask("shared", namespace))).To(Succeed())
+
+	install := &tinkv2.BootOptions{ToggleNetboot: true, BootMode: tinkv2.BootModeNetboot}
+	finish := &tinkv2.BootOptions{
+		BootMode:   tinkv2.BootModeCustomboot,
+		Customboot: &tinkv2.Customboot{PostOperations: []rufiov2.Operations{{PowerAction: ptr.To(rufiov2.PowerActionHardOff)}}},
+	}
+
+	scope := envtestScope(g, tinkerbell, namespace, "")
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a"), refTask("shared", "shared")}
+	scope.tinkerbellMachine.Spec.Tasks[0].BootOptions = install
+	scope.tinkerbellMachine.Spec.Tasks[1].BootOptions = finish
+
+	g.Expect(scope.createWorkflow(hw)).To(Succeed(), "the API server must accept the Task and the Workflow")
+
+	wf := &tinkv2.Workflow{}
+	g.Expect(tinkerbell.Get(scope.ctx, client.ObjectKey{Name: wfMachine, Namespace: namespace}, wf)).To(Succeed())
+	g.Expect(wf.Spec.Tasks).To(HaveLen(2))
+	g.Expect(wf.Spec.Tasks[0].Hardware.BootOptions).To(Equal(install))
+	g.Expect(wf.Spec.Tasks[1].Hardware.BootOptions).To(Equal(finish))
+	g.Expect(wf.Spec.Tasks[1].TaskRef).To(Equal(tinkv2.SimpleReference{Name: "shared", Namespace: namespace}))
+
+	g.Expect(scope.removeDependencies()).To(Succeed())
+
+	tasks := &tinkv2.TaskList{}
+	g.Expect(tinkerbell.List(scope.ctx, tasks, client.InNamespace(namespace))).To(Succeed())
+	g.Expect(tasks.Items).To(HaveLen(1), "the referenced Task stays")
 }
 
 func testCompatibilityWorkflowCRDs(t *testing.T, tinkerbell client.Client, namespace string) {

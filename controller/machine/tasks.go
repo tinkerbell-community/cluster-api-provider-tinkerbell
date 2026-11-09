@@ -17,11 +17,16 @@ limitations under the License.
 package machine
 
 import (
+	"cmp"
 	"errors"
+	"fmt"
 	"strings"
 
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/cluster-api/util/record"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
@@ -40,6 +45,21 @@ const (
 	deprecatedTemplateSourceReason       = "DeprecatedTemplateSource"
 	bootOptionsIgnoredReason             = "BootOptionsIgnored"
 	templatedCustombootConfigReason      = "TemplatedCustombootConfig"
+	taskNotFoundReason                   = "TaskNotFound"
+	taskConflictReason                   = "TaskConflict"
+	workflowNotRenderedReason            = "WorkflowNotRendered"
+)
+
+var (
+	// ErrTaskNotFound is returned when a Task a machine's tasks reference does not exist.
+	ErrTaskNotFound = errors.New("task not found")
+
+	// ErrTaskConflict is returned when a Task CAPT would create for a machine's inline tasks
+	// entry already exists and is not the machine's.
+	ErrTaskConflict = errors.New("task belongs to something else")
+
+	// errWorkflowNotRendered is returned while Tinkerbell cannot render the machine's Workflow.
+	errWorkflowNotRendered = errors.New("workflow tasks did not render")
 )
 
 // ErrTemplatedCustombootConfig is returned when a machine running Tasks would take its boot
@@ -163,4 +183,155 @@ func (scope *machineReconcileScope) defaultBootOptions(hw *tinkv2.Hardware) (*ti
 	}
 
 	return wf.Spec.Tasks[0].Hardware.BootOptions, nil
+}
+
+// createTaskWorkflow creates the machine's inline Tasks and a native v1alpha2 Workflow that runs
+// tasks, in order, on hw. origin says where tasks came from (see taskSource).
+//
+// Nothing is created until everything the Workflow needs is known to be there: the referenced
+// Tasks exist, no inline Task's name is taken, and the boot options resolve.
+func (scope *machineReconcileScope) createTaskWorkflow(hw *tinkv2.Hardware, tasks []infrastructurev1.MachineTask, origin string) error {
+	if len(hw.Spec.StorageDevices) < 1 {
+		return ErrHardwareMissingDiskConfiguration
+	}
+
+	refs, inline, err := scope.resolveTasks(tasks, origin)
+	if err != nil {
+		return err
+	}
+
+	boot, err := scope.taskBootOptions(hw, tasks)
+	if err != nil {
+		return err
+	}
+
+	if err := scope.ensureTasks(inline); err != nil {
+		return err
+	}
+
+	wf := scope.taskWorkflow(hw, refs, boot)
+	if err := scope.setResourceOwnership(wf); err != nil {
+		return fmt.Errorf("setting workflow ownership: %w", err)
+	}
+
+	if err := scope.tinkerbellClient.Create(scope.ctx, wf); err != nil {
+		return fmt.Errorf("creating workflow: %w", err)
+	}
+
+	scope.log.Info("created Workflow running v1alpha2 Tasks", "workflow", wf.Name, "tasks", len(tasks), "from", origin)
+
+	return nil
+}
+
+// resolveTasks returns the Task each of tasks runs, index-aligned with them, and the inline
+// Tasks to create for the machine. A referenced Task must exist, and an inline Task's name must
+// not be taken by a Task that is not the machine's.
+func (scope *machineReconcileScope) resolveTasks(tasks []infrastructurev1.MachineTask, origin string) ([]tinkv2.SimpleReference, []tinkv2.Task, error) {
+	refs := make([]tinkv2.SimpleReference, len(tasks))
+
+	var inline []tinkv2.Task
+
+	for i, task := range tasks {
+		if task.TaskRef == nil {
+			created := scope.inlineTask(task)
+			if err := scope.setResourceOwnership(&created); err != nil {
+				return nil, nil, fmt.Errorf("setting Task ownership: %w", err)
+			}
+
+			inline = append(inline, created)
+			refs[i] = tinkv2.SimpleReference{Name: created.Name, Namespace: created.Namespace}
+
+			continue
+		}
+
+		ref, err := scope.referencedTask(task, origin)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		refs[i] = ref
+	}
+
+	reason, err := scope.taskConflict(inline)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if reason != "" {
+		record.Warnf(scope.tinkerbellMachine, taskConflictReason, "%s", reason)
+
+		return nil, nil, fmt.Errorf("%w: %s", ErrTaskConflict, reason)
+	}
+
+	return refs, inline, nil
+}
+
+// referencedTask returns the reference to the existing Task task names, its namespace
+// defaulted to the Tinkerbell namespace, after checking it exists.
+func (scope *machineReconcileScope) referencedTask(task infrastructurev1.MachineTask, origin string) (tinkv2.SimpleReference, error) {
+	key := types.NamespacedName{Name: task.TaskRef.Name, Namespace: cmp.Or(task.TaskRef.Namespace, scope.tinkerbellNamespace())}
+
+	if err := scope.tinkerbellClient.Get(scope.ctx, key, &tinkv2.Task{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			record.Warnf(scope.tinkerbellMachine, taskNotFoundReason, "Task %s, entry %q of the %s tasks, does not exist", key, task.Name, origin)
+
+			return tinkv2.SimpleReference{}, fmt.Errorf("%w: %s", ErrTaskNotFound, key)
+		}
+
+		return tinkv2.SimpleReference{}, fmt.Errorf("getting Task %s: %w", key, err)
+	}
+
+	return tinkv2.SimpleReference{Name: key.Name, Namespace: key.Namespace}, nil
+}
+
+// taskWorkflow returns the machine's Workflow running the Tasks refs on hw, each with its boot
+// options from boot (index-aligned).
+func (scope *machineReconcileScope) taskWorkflow(hw *tinkv2.Hardware, refs []tinkv2.SimpleReference, boot []*tinkv2.BootOptions) *tinkv2.Workflow {
+	wf := &tinkv2.Workflow{
+		ObjectMeta: metav1.ObjectMeta{Name: scope.tinkerbellMachine.Name, Namespace: scope.tinkerbellNamespace()},
+		Spec: tinkv2.WorkflowSpec{
+			Globals: &tinkv2.Extra{TemplateMap: scope.workflowTemplateData(hw)},
+			Tasks:   make([]tinkv2.WorkflowTask, len(refs)),
+		},
+	}
+
+	for i, ref := range refs {
+		wf.Spec.Tasks[i] = tinkv2.WorkflowTask{
+			AgentID: hardwareLookupID(hw),
+			TaskRef: ref,
+			Hardware: &tinkv2.WorkflowHardware{
+				HardwareRef: &tinkv2.SimpleReference{Name: hw.Name, Namespace: hw.Namespace},
+				BootOptions: boot[i],
+			},
+		}
+	}
+
+	return wf
+}
+
+// inlineTask returns the Task CAPT creates for the machine from an inline tasks entry.
+func (scope *machineReconcileScope) inlineTask(task infrastructurev1.MachineTask) tinkv2.Task {
+	return tinkv2.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      scope.tinkerbellMachine.Name + "-" + task.Name,
+			Namespace: scope.tinkerbellNamespace(),
+		},
+		Spec: *task.TaskInline.DeepCopy(),
+	}
+}
+
+// notRenderedMessage returns why Tinkerbell could not render wf, while it has not started and
+// says so, or "".
+func notRenderedMessage(wf *tinkv2.Workflow) string {
+	if wf.Status.Metadata.Workflow.State != 0 {
+		return ""
+	}
+
+	for _, c := range wf.Status.Conditions {
+		if c.Type == tinkv2.TemplateRenderedSuccess && c.Status == metav1.ConditionFalse {
+			return cmp.Or(c.Message, c.Reason, "no reason given")
+		}
+	}
+
+	return ""
 }

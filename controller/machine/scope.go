@@ -30,6 +30,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/patch"
+	"sigs.k8s.io/cluster-api/util/record"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/go-logr/logr"
@@ -227,6 +228,13 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv2.Hardware) error { //nol
 		}
 
 		return fmt.Errorf("ensure workflow returned: %w", err)
+	}
+
+	// Tinkerbell leaves a Workflow it cannot render unstarted; say why rather than wait silently.
+	if msg := notRenderedMessage(wf); msg != "" {
+		record.Warnf(scope.tinkerbellMachine, workflowNotRenderedReason, "Workflow %s/%s does not render: %s", wf.Namespace, wf.Name, msg)
+
+		return fmt.Errorf("%w: %s", errWorkflowNotRendered, msg)
 	}
 
 	// The Workflow's state, as v1alpha1 status.state was. Zero means it has not started.
