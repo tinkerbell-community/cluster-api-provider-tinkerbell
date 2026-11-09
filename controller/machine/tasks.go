@@ -45,6 +45,8 @@ const (
 	bootOptionsIgnoredReason             = "BootOptionsIgnored"
 	templatedCustombootConfigReason      = "TemplatedCustombootConfig"
 	taskNotFoundReason                   = "TaskNotFound"
+	taskNotReadableReason                = "TaskNotReadable"
+	taskManagedByCAPTReason              = "TaskManagedByCAPT"
 	taskConflictReason                   = "TaskConflict"
 	workflowNotRenderedReason            = "WorkflowNotRendered"
 	bootModeWithoutBMCReason             = "BootModeWithoutBMC"
@@ -57,6 +59,10 @@ var (
 	// ErrTaskConflict is returned when a Task CAPT would create for a machine's inline tasks
 	// entry already exists and is not the machine's.
 	ErrTaskConflict = errors.New("task belongs to something else")
+
+	// ErrTaskManagedByCAPT is returned when a taskRef names a Task CAPT created for a machine,
+	// which CAPT deletes with that machine.
+	ErrTaskManagedByCAPT = errors.New("task is managed by CAPT for a machine")
 
 	// errWorkflowNotRendered is returned while Tinkerbell cannot render the machine's Workflow.
 	errWorkflowNotRendered = errors.New("workflow tasks did not render")
@@ -247,12 +253,16 @@ func (scope *machineReconcileScope) createTaskWorkflow(hw *tinkv2.Hardware, task
 }
 
 // resolveTasks returns the Task each of tasks runs, index-aligned with them, and the inline
-// Tasks to create for the machine. A referenced Task must exist, and an inline Task's name must
-// not be taken by a Task that is not the machine's.
+// Tasks to create for the machine. Every referenced Task must exist (all missing ones are
+// reported together) and be one the user manages, and an inline Task's name must not be taken by
+// a Task that is not the machine's.
 func (scope *machineReconcileScope) resolveTasks(tasks []infrastructurev1.MachineTask, origin string) ([]tinkv2.SimpleReference, []tinkv2.Task, error) {
 	refs := make([]tinkv2.SimpleReference, len(tasks))
 
-	var inline []tinkv2.Task
+	var (
+		inline  []tinkv2.Task
+		missing []string
+	)
 
 	for i, task := range tasks {
 		if task.TaskRef == nil {
@@ -268,11 +278,21 @@ func (scope *machineReconcileScope) resolveTasks(tasks []infrastructurev1.Machin
 		}
 
 		ref, err := scope.referencedTask(task, origin)
-		if err != nil {
+
+		switch {
+		case errors.Is(err, ErrTaskNotFound):
+			missing = append(missing, ref.Namespace+"/"+ref.Name)
+
+			continue
+		case err != nil:
 			return nil, nil, err
 		}
 
 		refs[i] = ref
+	}
+
+	if len(missing) > 0 {
+		return nil, nil, fmt.Errorf("%w: %s", ErrTaskNotFound, strings.Join(missing, ", "))
 	}
 
 	reason, err := scope.taskConflict(inline)
@@ -290,21 +310,35 @@ func (scope *machineReconcileScope) resolveTasks(tasks []infrastructurev1.Machin
 }
 
 // referencedTask returns the reference to the existing Task task names, its namespace
-// defaulted to the Tinkerbell namespace, after checking it exists.
+// defaulted to the Tinkerbell namespace. It returns ErrTaskNotFound when the Task does not exist
+// and ErrTaskManagedByCAPT when CAPT created it for a machine, which would delete it with that
+// machine; each problem is recorded on the TinkerbellMachine.
 func (scope *machineReconcileScope) referencedTask(task infrastructurev1.MachineTask, origin string) (tinkv2.SimpleReference, error) {
 	key := types.NamespacedName{Name: task.TaskRef.Name, Namespace: cmp.Or(task.TaskRef.Namespace, scope.tinkerbellNamespace())}
+	ref := tinkv2.SimpleReference{Name: key.Name, Namespace: key.Namespace}
 
-	if err := scope.tinkerbellClient.Get(scope.ctx, key, &tinkv2.Task{}); err != nil {
+	existing := &tinkv2.Task{}
+	if err := scope.tinkerbellClient.Get(scope.ctx, key, existing); err != nil {
 		if apierrors.IsNotFound(err) {
 			scope.warnf(taskNotFoundReason, "Task %s, entry %q of the %s tasks, does not exist", key, task.Name, origin)
 
-			return tinkv2.SimpleReference{}, fmt.Errorf("%w: %s", ErrTaskNotFound, key)
+			return ref, ErrTaskNotFound
 		}
 
-		return tinkv2.SimpleReference{}, fmt.Errorf("getting Task %s: %w", key, err)
+		scope.warnf(taskNotReadableReason, "Task %s, entry %q of the %s tasks, cannot be read: %v", key, task.Name, origin, err)
+
+		return ref, fmt.Errorf("getting Task %s: %w", key, err)
 	}
 
-	return tinkv2.SimpleReference{Name: key.Name, Namespace: key.Namespace}, nil
+	if owner, managed := existing.Labels[LabelMachineName]; managed {
+		scope.warnf(taskManagedByCAPTReason,
+			"Task %s, entry %q of the %s tasks, was created by CAPT for machine %s and is deleted with it; use taskInline, or reference a Task you manage",
+			key, task.Name, origin, owner)
+
+		return ref, fmt.Errorf("%w: %s", ErrTaskManagedByCAPT, key)
+	}
+
+	return ref, nil
 }
 
 // taskWorkflow returns the machine's Workflow running the Tasks refs on hw, each with its boot

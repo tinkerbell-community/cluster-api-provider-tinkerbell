@@ -17,7 +17,9 @@ limitations under the License.
 package machine //nolint:testpackage
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -32,6 +34,8 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 )
@@ -604,4 +608,82 @@ func Test_reconcile_records_a_workflow_that_does_not_render(t *testing.T) {
 
 	g.Expect(scope.reconcile(hw)).NotTo(Succeed())
 	g.Expect(recordedEvents(scope)).To(ContainElement(SatisfyAll(HavePrefix("Warning WorkflowNotRendered"), ContainSubstring("boom"))))
+}
+
+func Test_createTaskWorkflow_records_a_task_it_cannot_read(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	scope := workflowTestScope(g, "", hw)
+	scope.tinkerbellClient = fake.NewClientBuilder().WithScheme(hardwareTestScheme(g)).WithObjects(hw).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if _, ok := obj.(*tinkv2.Task); ok && key.Name == "shared" {
+					return apierrors.NewForbidden(tinkv2.GroupVersion.WithResource("tasks").GroupResource(), key.Name, errors.New("no access"))
+				}
+
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).Build()
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{refTask("shared", "shared")}
+
+	err := scope.createWorkflow(hw)
+	g.Expect(apierrors.IsForbidden(err)).To(BeTrue(), "got %v", err)
+	g.Expect(recordedEvents(scope)).To(ContainElement(SatisfyAll(HavePrefix("Warning TaskNotReadable"), ContainSubstring("tink/shared"))))
+}
+
+func Test_createTaskWorkflow_reports_every_missing_ref(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	scope := workflowTestScope(g, "", hw)
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{
+		refTask("first", "missing-a"), inlineTask("x"), refTask("second", "missing-b"),
+	}
+
+	err := scope.createWorkflow(hw)
+	g.Expect(errors.Is(err, ErrTaskNotFound)).To(BeTrue(), "got %v", err)
+	g.Expect(err.Error()).To(SatisfyAll(ContainSubstring("tink/missing-a"), ContainSubstring("tink/missing-b")))
+
+	var notFound []string
+
+	for _, e := range recordedEvents(scope) {
+		if strings.HasPrefix(e, "Warning TaskNotFound") {
+			notFound = append(notFound, e)
+		}
+	}
+
+	g.Expect(notFound).To(HaveLen(2))
+	g.Expect(listTasks(g, scope)).To(BeEmpty())
+}
+
+// A Task CAPT created for a machine is deleted with that machine, and with this machine's own
+// cleanup, so a taskRef to one is refused: CAPT never deletes a Task someone references.
+func Test_createTaskWorkflow_refuses_a_reference_to_a_machine_task(t *testing.T) {
+	t.Parallel()
+
+	for _, owner := range []string{wfMachine, "machine-2"} {
+		t.Run(owner, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			managed := sharedTask(owner+"-old", wfNamespace)
+			managed.Labels = map[string]string{LabelMachineName: owner, LabelMachineNamespace: wfNamespace}
+
+			hw := workflowTestHardware(false)
+			scope := workflowTestScope(g, "", hw, managed)
+			scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a"), refTask("old", managed.Name)}
+
+			err := scope.createWorkflow(hw)
+			g.Expect(errors.Is(err, ErrTaskManagedByCAPT)).To(BeTrue(), "got %v", err)
+			g.Expect(recordedEvents(scope)).To(ContainElement(HavePrefix("Warning TaskManagedByCAPT")))
+
+			remaining := listTasks(g, scope)
+			g.Expect(remaining).To(HaveLen(1), "the referenced Task stays, and nothing is created")
+			g.Expect(remaining[0].Name).To(Equal(managed.Name))
+			g.Expect(apierrors.IsNotFound(scope.tinkerbellClient.Get(scope.ctx, machineKey(), &tinkv2.Workflow{}))).To(BeTrue())
+		})
+	}
 }
