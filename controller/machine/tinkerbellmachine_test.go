@@ -1908,7 +1908,7 @@ func Test_Machine_reconciliation_fails_when_no_template_configured(t *testing.T)
 
 	_, err := reconcileMachineWithClient(client, tinkerbellMachineName, clusterNamespace)
 	g.Expect(err).To(HaveOccurred(), "Expected reconciliation to fail when no template is configured")
-	g.Expect(err.Error()).To(ContainSubstring("no template found"))
+	g.Expect(err.Error()).To(ContainSubstring("no tasks or template found"))
 
 	// Verify no Template resource was created.
 	ctx := context.Background()

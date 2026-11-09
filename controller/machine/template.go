@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/cluster-api/util/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -24,8 +25,8 @@ var (
 	ErrTemplatesNotServed = errors.New("tinkerbell no longer serves v1alpha1 Templates")
 
 	// ErrNoTemplateFound is returned when no template source is configured at any level.
-	ErrNoTemplateFound = fmt.Errorf("no template found: set templateInline or templateRef on TinkerbellMachine, "+
-		"hardware annotation %q, or templateInline/templateRef on TinkerbellCluster", HardwareTemplateOverrideAnnotation)
+	ErrNoTemplateFound = fmt.Errorf("no tasks or template found: set tasks on TinkerbellMachine, "+
+		"hardware annotation %q, or tasks on TinkerbellCluster", HardwareTaskRefsAnnotation)
 )
 
 // fetchTemplateRefData fetches a Tinkerbell Template by ObjectRef and returns its spec.data.
@@ -273,6 +274,9 @@ func (scope *machineReconcileScope) templateFromAnnotation(hw *tinkv2.Hardware) 
 	}
 
 	scope.log.V(4).Info("found template override in Hardware annotations, using it as template", "templateName", templateName)
+	record.Eventf(scope.tinkerbellMachine, deprecatedTemplateSourceReason,
+		"Hardware %s/%s names Template %s with the deprecated %s annotation; use %s",
+		hw.Namespace, hw.Name, templateName, HardwareTemplateOverrideAnnotation, HardwareTaskRefsAnnotation)
 
 	return data, nil
 }
