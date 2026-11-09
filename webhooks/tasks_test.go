@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
+	infrav1beta1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta1"
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 )
 
@@ -96,6 +97,11 @@ func Test_validateSource(t *testing.T) {
 			name:  "inline task with references",
 			tasks: []infrastructurev1.MachineTask{withRefs},
 			want:  []field.ErrorType{field.ErrorTypeForbidden},
+		},
+		{
+			name:  "reference without a name",
+			tasks: []infrastructurev1.MachineTask{{Name: "a", TaskRef: &infrastructurev1.TaskRef{}}},
+			want:  []field.ErrorType{field.ErrorTypeRequired},
 		},
 		{
 			name:  "duplicate names",
@@ -202,4 +208,27 @@ func Test_webhooks_reject_two_sources(t *testing.T) {
 			g.Expect(err).To(MatchError(ContainSubstring("at most one of tasks, templateInline and templateRef may be set")))
 		})
 	}
+}
+
+// A v1beta1 client has no tasks field, but its write converts to a v1beta2 object that restores
+// the tasks stashed in the conversion annotation: setting templateOverride then makes two
+// sources, which the v1beta2 CEL rules never see on a v1beta1 write, so the webhook must.
+func Test_webhook_rejects_a_v1beta1_write_restoring_tasks_next_to_a_template(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hub := &infrastructurev1.TinkerbellMachine{}
+	hub.Spec.Tasks = []infrastructurev1.MachineTask{inline()}
+
+	spoke := &infrav1beta1.TinkerbellMachine{}
+	g.Expect(infrav1beta1.ConvertMachineFromHub(spoke, hub)).To(Succeed())
+
+	spoke.Spec.TemplateOverride = "t"
+
+	written := &infrastructurev1.TinkerbellMachine{}
+	g.Expect(infrav1beta1.ConvertMachineToHub(spoke, written)).To(Succeed())
+	g.Expect(written.Spec.Tasks).To(HaveLen(1), "the stashed tasks come back")
+
+	_, err := (&TinkerbellMachine{}).ValidateCreate(context.Background(), written)
+	g.Expect(err).To(MatchError(ContainSubstring("at most one of tasks, templateInline and templateRef may be set")))
 }

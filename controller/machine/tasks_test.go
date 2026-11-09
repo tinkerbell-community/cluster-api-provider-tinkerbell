@@ -687,3 +687,16 @@ func Test_createTaskWorkflow_refuses_a_reference_to_a_machine_task(t *testing.T)
 		})
 	}
 }
+
+func Test_createTaskWorkflow_needs_storage_devices(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	hw.Spec.StorageDevices = nil
+	scope := workflowTestScope(g, "", hw)
+	scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a")}
+
+	g.Expect(scope.createWorkflow(hw)).To(MatchError(ErrHardwareMissingDiskConfiguration))
+	g.Expect(listTasks(g, scope)).To(BeEmpty())
+}

@@ -64,6 +64,9 @@ type MachineTask struct {
 // TaskRef references an existing Tinkerbell Task.
 type TaskRef struct {
 	// Name is the name of the Task.
+	//
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 
 	// Namespace is the namespace of the Task. Defaults to the Tinkerbell namespace, where

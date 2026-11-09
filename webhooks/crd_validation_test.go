@@ -49,6 +49,12 @@ func refEntry(name, task string) v1beta2.MachineTask {
 	return v1beta2.MachineTask{Name: name, TaskRef: &v1beta2.TaskRef{Name: task}}
 }
 
+func clusterTemplateWith(spec v1beta2.TinkerbellClusterSpec) *v1beta2.TinkerbellClusterTemplate {
+	return &v1beta2.TinkerbellClusterTemplate{Spec: v1beta2.TinkerbellClusterTemplateSpec{
+		Template: v1beta2.TinkerbellClusterTemplateResource{Spec: spec},
+	}}
+}
+
 func machineWith(config v1beta2.TinkerbellMachineConfig) *v1beta2.TinkerbellMachine {
 	return &v1beta2.TinkerbellMachine{Spec: v1beta2.TinkerbellMachineSpec{TinkerbellMachineConfig: config}}
 }
@@ -163,6 +169,16 @@ func rejectedObjects() []rejectedObject {
 			want: "Duplicate value",
 		},
 		{
+			name: "taskRef with an empty name",
+			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Tasks: []v1beta2.MachineTask{refEntry("a", "")}}),
+			want: "should be at least 1 chars long",
+		},
+		{
+			name: "cluster template with tasks and templateInline",
+			obj:  clusterTemplateWith(v1beta2.TinkerbellClusterSpec{Tasks: []v1beta2.MachineTask{inlineEntry("a")}, TemplateInline: "t"}),
+			want: sourceRuleMessage,
+		},
+		{
 			name: "inline task with references",
 			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Tasks: []v1beta2.MachineTask{withRefs}}),
 			want: "taskInline cannot set references",
@@ -193,6 +209,7 @@ func acceptedObjects() []acceptedObject {
 			}},
 		},
 		{name: "cluster with a mixed list", obj: &v1beta2.TinkerbellCluster{Spec: v1beta2.TinkerbellClusterSpec{Tasks: mixed}}},
+		{name: "cluster template with a mixed list", obj: clusterTemplateWith(v1beta2.TinkerbellClusterSpec{Tasks: mixed})},
 		{name: "machine with templateInline only", obj: machineWith(v1beta2.TinkerbellMachineConfig{TemplateInline: "t"})},
 	}
 }

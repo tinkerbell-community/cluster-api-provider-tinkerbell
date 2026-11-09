@@ -1560,6 +1560,8 @@ spec:
                               properties:
                                 name:
                                   description: Name is the name of the Task.
+                                  maxLength: 253
+                                  minLength: 1
                                   type: string
                                 namespace:
                                   description: |-
