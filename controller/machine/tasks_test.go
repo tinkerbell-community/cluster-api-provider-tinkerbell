@@ -29,7 +29,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 )
@@ -475,4 +477,131 @@ func Test_bootModesWithoutBMC(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(bootModesWithoutBMC(workflowTestHardware(false), tasks)).To(Equal([]string{"netboot"}))
 	g.Expect(bootModesWithoutBMC(workflowTestHardware(true), tasks)).To(BeEmpty())
+}
+
+// recordedEvents drains the events the scope's fake recorder holds, as "Type Reason message".
+func recordedEvents(scope *machineReconcileScope) []string {
+	rec, ok := scope.recorder.(*record.FakeRecorder)
+	if !ok {
+		return nil
+	}
+
+	var out []string
+
+	for {
+		select {
+		case e := <-rec.Events:
+			out = append(out, e)
+		default:
+			return out
+		}
+	}
+}
+
+// Each problem a Task source can have is recorded on the TinkerbellMachine, where the user
+// looks, and not only in the controller's logs.
+func Test_task_source_problems_are_recorded_on_the_machine(t *testing.T) {
+	t.Parallel()
+
+	withRefs := func(scope *machineReconcileScope) {
+		scope.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{refTask("missing", "missing")}
+	}
+
+	for _, tt := range []struct {
+		name    string
+		bmc     bool
+		objects []client.Object
+		setup   func(*machineReconcileScope, *tinkv2.Hardware)
+		want    string
+	}{
+		{
+			name:  "missing reference",
+			setup: func(s *machineReconcileScope, _ *tinkv2.Hardware) { withRefs(s) },
+			want:  "Warning TaskNotFound",
+		},
+		{
+			name:    "taken inline name",
+			objects: []client.Object{sharedTask("machine-1-a", wfNamespace)},
+			setup: func(s *machineReconcileScope, _ *tinkv2.Hardware) {
+				s.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a")}
+			},
+			want: "Warning TaskConflict",
+		},
+		{
+			name: "machine boot options ignored",
+			bmc:  true,
+			setup: func(s *machineReconcileScope, _ *tinkv2.Hardware) {
+				s.tinkerbellMachine.Spec.BootOptions = infrastructurev1.BootOptions{BootMode: tinkv1.BootModeNetboot}
+				s.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a")}
+				s.tinkerbellMachine.Spec.Tasks[0].BootOptions = &tinkv2.BootOptions{ToggleNetboot: true}
+			},
+			want: "Warning BootOptionsIgnored",
+		},
+		{
+			name: "boot mode without a BMC",
+			setup: func(s *machineReconcileScope, _ *tinkv2.Hardware) {
+				s.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a")}
+				s.tinkerbellMachine.Spec.Tasks[0].BootOptions = &tinkv2.BootOptions{BootMode: tinkv2.BootModeNetboot}
+			},
+			want: "Warning BootModeWithoutBMC",
+		},
+		{
+			name: "templated customboot",
+			bmc:  true,
+			setup: func(s *machineReconcileScope, _ *tinkv2.Hardware) {
+				s.tinkerbellMachine.Spec.Tasks = []infrastructurev1.MachineTask{inlineTask("a")}
+				s.tinkerbellMachine.Spec.BootOptions = infrastructurev1.BootOptions{
+					BootMode: tinkv1.BootModeCustomboot,
+					CustombootConfig: tinkv1.CustombootConfig{PreparingActions: []rufiov1.Action{{VirtualMediaAction: &rufiov1.VirtualMediaAction{
+						MediaURL: "http://smee/{{ .Hardware.Disks }}.iso", Kind: rufiov1.VirtualMediaCD,
+					}}}},
+				}
+			},
+			want: "Warning TemplatedCustombootConfig",
+		},
+		{
+			name:    "both hardware annotations",
+			objects: []client.Object{sharedTask("shared", wfNamespace)},
+			setup: func(_ *machineReconcileScope, hw *tinkv2.Hardware) {
+				hw.Annotations = map[string]string{HardwareTaskRefsAnnotation: "shared", HardwareTemplateOverrideAnnotation: "t"}
+			},
+			want: "Warning ConflictingHardwareAnnotations",
+		},
+		{
+			name: "deprecated template annotation",
+			objects: []client.Object{&tinkv1.Template{
+				ObjectMeta: metav1.ObjectMeta{Name: "t", Namespace: wfNamespace},
+				Spec:       tinkv1.TemplateSpec{Data: ptr.To(talosTemplate)},
+			}},
+			setup: func(_ *machineReconcileScope, hw *tinkv2.Hardware) {
+				hw.Annotations = map[string]string{HardwareTemplateOverrideAnnotation: "t"}
+			},
+			want: "Normal DeprecatedTemplateSource",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			hw := workflowTestHardware(tt.bmc)
+			scope := workflowTestScope(g, "", append(tt.objects, hw)...)
+			tt.setup(scope, hw)
+
+			_ = scope.createWorkflow(hw)
+			g.Expect(recordedEvents(scope)).To(ContainElement(HavePrefix(tt.want)))
+		})
+	}
+}
+
+func Test_reconcile_records_a_workflow_that_does_not_render(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	hw := workflowTestHardware(false)
+	wf := &tinkv2.Workflow{ObjectMeta: metav1.ObjectMeta{Name: wfMachine, Namespace: wfNamespace}}
+	wf.Status.SetCondition(tinkv2.WorkflowCondition{Type: tinkv2.TemplateRenderedSuccess, Status: metav1.ConditionFalse, Message: "boom"})
+	scope := workflowTestScope(g, "", hw, wf)
+
+	g.Expect(scope.reconcile(hw)).NotTo(Succeed())
+	g.Expect(recordedEvents(scope)).To(ContainElement(SatisfyAll(HavePrefix("Warning WorkflowNotRendered"), ContainSubstring("boom"))))
 }

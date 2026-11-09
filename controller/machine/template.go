@@ -12,7 +12,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/cluster-api/util/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -274,7 +273,7 @@ func (scope *machineReconcileScope) templateFromAnnotation(hw *tinkv2.Hardware) 
 	}
 
 	scope.log.V(4).Info("found template override in Hardware annotations, using it as template", "templateName", templateName)
-	record.Eventf(scope.tinkerbellMachine, deprecatedTemplateSourceReason,
+	scope.eventf(deprecatedTemplateSourceReason,
 		"Hardware %s/%s names Template %s with the deprecated %s annotation; use %s",
 		hw.Namespace, hw.Name, templateName, HardwareTemplateOverrideAnnotation, HardwareTaskRefsAnnotation)
 

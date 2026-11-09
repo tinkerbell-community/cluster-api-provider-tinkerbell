@@ -27,6 +27,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientrecord "k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/patch"
@@ -92,6 +93,10 @@ type machineReconcileScope struct {
 	reservedAddress *hardwareAddress
 
 	watchManager *tinkcluster.NamespaceWatchManager
+
+	// recorder, when set, receives the events recorded on the TinkerbellMachine; otherwise they
+	// go to Cluster API's global recorder, which the manager initializes.
+	recorder clientrecord.EventRecorder
 }
 
 func (scope *machineReconcileScope) addFinalizer() error {
@@ -147,6 +152,28 @@ func (scope *machineReconcileScope) setResourceOwnership(obj client.Object) erro
 	}
 
 	return nil
+}
+
+// warnf records a Warning event on the TinkerbellMachine.
+func (scope *machineReconcileScope) warnf(reason, format string, args ...any) {
+	if scope.recorder != nil {
+		scope.recorder.Eventf(scope.tinkerbellMachine, corev1.EventTypeWarning, reason, format, args...)
+
+		return
+	}
+
+	record.Warnf(scope.tinkerbellMachine, reason, format, args...)
+}
+
+// eventf records a Normal event on the TinkerbellMachine.
+func (scope *machineReconcileScope) eventf(reason, format string, args ...any) {
+	if scope.recorder != nil {
+		scope.recorder.Eventf(scope.tinkerbellMachine, corev1.EventTypeNormal, reason, format, args...)
+
+		return
+	}
+
+	record.Eventf(scope.tinkerbellMachine, reason, format, args...)
 }
 
 type errRequeueRequested struct{}
@@ -232,7 +259,7 @@ func (scope *machineReconcileScope) reconcile(hw *tinkv2.Hardware) error { //nol
 
 	// Tinkerbell leaves a Workflow it cannot render unstarted; say why rather than wait silently.
 	if msg := notRenderedMessage(wf); msg != "" {
-		record.Warnf(scope.tinkerbellMachine, workflowNotRenderedReason, "Workflow %s/%s does not render: %s", wf.Namespace, wf.Name, msg)
+		scope.warnf(workflowNotRenderedReason, "Workflow %s/%s does not render: %s", wf.Namespace, wf.Name, msg)
 
 		return fmt.Errorf("%w: %s", errWorkflowNotRendered, msg)
 	}

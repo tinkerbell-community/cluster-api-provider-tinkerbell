@@ -27,7 +27,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/cluster-api/util/record"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
 )
@@ -105,7 +104,7 @@ func (scope *machineReconcileScope) taskSource(hw *tinkv2.Hardware) ([]infrastru
 
 	if tasks := hardwareTaskRefs(hw); len(tasks) > 0 {
 		if _, ok := hw.Annotations[HardwareTemplateOverrideAnnotation]; ok {
-			record.Warnf(scope.tinkerbellMachine, conflictingHardwareAnnotationsReason,
+			scope.warnf(conflictingHardwareAnnotationsReason,
 				"Hardware %s/%s sets both %s and %s; running the Tasks", hw.Namespace, hw.Name,
 				HardwareTaskRefsAnnotation, HardwareTemplateOverrideAnnotation)
 		}
@@ -143,12 +142,12 @@ func (scope *machineReconcileScope) taskBootOptions(hw *tinkv2.Hardware, tasks [
 
 	if explicit {
 		if !equality.Semantic.DeepEqual(scope.tinkerbellMachine.Spec.BootOptions, infrastructurev1.BootOptions{}) {
-			record.Warnf(scope.tinkerbellMachine, bootOptionsIgnoredReason,
+			scope.warnf(bootOptionsIgnoredReason,
 				"spec.bootOptions is ignored: the tasks entries set their own bootOptions")
 		}
 
 		for _, name := range bootModesWithoutBMC(hw, tasks) {
-			record.Warnf(scope.tinkerbellMachine, bootModeWithoutBMCReason,
+			scope.warnf(bootModeWithoutBMCReason,
 				"tasks entry %q sets bootOptions.bootMode, but Hardware %s/%s has no BMC: Tinkerbell will fail the Workflow", name, hw.Namespace, hw.Name)
 		}
 
@@ -197,7 +196,7 @@ func (scope *machineReconcileScope) defaultBootOptions(hw *tinkv2.Hardware) (*ti
 	}
 
 	if templatedBootOptions(wf) {
-		record.Warnf(scope.tinkerbellMachine, templatedCustombootConfigReason, "%s", ErrTemplatedCustombootConfig.Error())
+		scope.warnf(templatedCustombootConfigReason, "%s", ErrTemplatedCustombootConfig.Error())
 
 		return nil, ErrTemplatedCustombootConfig
 	}
@@ -282,7 +281,7 @@ func (scope *machineReconcileScope) resolveTasks(tasks []infrastructurev1.Machin
 	}
 
 	if reason != "" {
-		record.Warnf(scope.tinkerbellMachine, taskConflictReason, "%s", reason)
+		scope.warnf(taskConflictReason, "%s", reason)
 
 		return nil, nil, fmt.Errorf("%w: %s", ErrTaskConflict, reason)
 	}
@@ -297,7 +296,7 @@ func (scope *machineReconcileScope) referencedTask(task infrastructurev1.Machine
 
 	if err := scope.tinkerbellClient.Get(scope.ctx, key, &tinkv2.Task{}); err != nil {
 		if apierrors.IsNotFound(err) {
-			record.Warnf(scope.tinkerbellMachine, taskNotFoundReason, "Task %s, entry %q of the %s tasks, does not exist", key, task.Name, origin)
+			scope.warnf(taskNotFoundReason, "Task %s, entry %q of the %s tasks, does not exist", key, task.Name, origin)
 
 			return tinkv2.SimpleReference{}, fmt.Errorf("%w: %s", ErrTaskNotFound, key)
 		}
