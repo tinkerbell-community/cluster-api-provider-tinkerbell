@@ -20,7 +20,20 @@ import (
 	"flag"
 	"io"
 	"testing"
+
+	capifeature "sigs.k8s.io/cluster-api/feature"
 )
+
+// testFlagSet registers CAPT's flags with a copy of the Cluster API feature
+// gates: a gate set by one test would otherwise leak into every later parse,
+// and these tests run in parallel.
+func testFlagSet() *flag.FlagSet {
+	fs := flag.NewFlagSet("capt-test", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	(&config{gates: capifeature.MutableGates.DeepCopy()}).initFlags(fs)
+
+	return fs
+}
 
 // The Cluster API operator renders a Provider CR's spec.manager.featureGates
 // into a --feature-gates argument on the manager container. CAPT consumes no
@@ -30,9 +43,7 @@ import (
 func TestFeatureGatesFlagAcceptsStandardGates(t *testing.T) {
 	t.Parallel()
 
-	fs := flag.NewFlagSet("capt-test", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	(&config{}).initFlags(fs)
+	fs := testFlagSet()
 
 	if err := fs.Parse([]string{"--feature-gates=ClusterTopology=true,MachinePool=true"}); err != nil {
 		t.Fatalf("expected --feature-gates with standard Cluster API gates to parse, got: %v", err)
@@ -42,9 +53,7 @@ func TestFeatureGatesFlagAcceptsStandardGates(t *testing.T) {
 func TestFeatureGatesFlagRejectsUnknownGate(t *testing.T) {
 	t.Parallel()
 
-	fs := flag.NewFlagSet("capt-test", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	(&config{}).initFlags(fs)
+	fs := testFlagSet()
 
 	if err := fs.Parse([]string{"--feature-gates=NoSuchGate=true"}); err == nil {
 		t.Fatal("expected an unknown feature gate to be rejected")

@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	cgrecord "k8s.io/client-go/tools/record"
+	"k8s.io/component-base/featuregate"
 	"k8s.io/klog/v2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ipamv1 "sigs.k8s.io/cluster-api/api/ipam/v1beta2"
@@ -73,6 +74,9 @@ type config struct {
 	LeaderElectionRenewDeadline   time.Duration
 	LeaderElectionRetryPeriod     time.Duration
 	ExternalKubeconfig            string
+
+	// gates is what --feature-gates sets; the Cluster API feature gates when nil.
+	gates featuregate.MutableFeatureGate
 }
 
 type tinkerbellClientResult struct {
@@ -392,7 +396,12 @@ func (c *config) initFlags(fs *flag.FlagSet) { //nolint:funlen
 		"Path to a kubeconfig file for an external Tinkerbell cluster.",
 	)
 
-	fs.Var(featureGatesFlag{},
+	gates := c.gates
+	if gates == nil {
+		gates = capifeature.MutableGates
+	}
+
+	fs.Var(featureGatesFlag{gates: gates},
 		"feature-gates",
 		"A set of key=value pairs that describe feature gates for various features. "+
 			"CAPT consumes no gates itself; the flag is accepted so management tooling such as the "+
@@ -400,21 +409,23 @@ func (c *config) initFlags(fs *flag.FlagSet) { //nolint:funlen
 			"Options are:\n"+strings.Join(capifeature.MutableGates.KnownFeatures(), "\n"))
 }
 
-// featureGatesFlag adapts the Cluster API mutable feature gates to the standard
-// library's flag.Value, which featuregate.MutableFeatureGate does not satisfy
-// on its own (no String method on the interface).
-type featureGatesFlag struct{}
+// featureGatesFlag adapts mutable feature gates to the standard library's
+// flag.Value, which featuregate.MutableFeatureGate does not satisfy on its own
+// (no String method on the interface).
+type featureGatesFlag struct {
+	gates featuregate.MutableFeatureGate
+}
 
-func (featureGatesFlag) Set(value string) error {
-	if err := capifeature.MutableGates.Set(value); err != nil {
+func (f featureGatesFlag) Set(value string) error {
+	if err := f.gates.Set(value); err != nil {
 		return fmt.Errorf("setting feature gates: %w", err)
 	}
 
 	return nil
 }
 
-func (featureGatesFlag) String() string {
-	if s, ok := capifeature.MutableGates.(fmt.Stringer); ok {
+func (f featureGatesFlag) String() string {
+	if s, ok := f.gates.(fmt.Stringer); ok {
 		return s.String()
 	}
 
