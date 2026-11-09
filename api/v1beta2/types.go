@@ -17,8 +17,56 @@ limitations under the License.
 package v1beta2
 
 import (
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
+
+// MachineTask is one Task the machine's Workflow runs, given inline or by reference, with the
+// boot options applied around it, as in a task of a Tinkerbell v1alpha2 Workflow.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.taskRef) != has(self.taskInline)",message="exactly one of taskRef and taskInline must be set"
+type MachineTask struct {
+	// Name identifies the entry. A Task CAPT creates from TaskInline is named
+	// <machine name>-<name>.
+	//
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+
+	// TaskRef names an existing Task. CAPT never creates, changes or deletes it.
+	// Mutually exclusive with TaskInline.
+	//
+	// +optional
+	TaskRef *TaskRef `json:"taskRef,omitempty"`
+
+	// TaskInline is a Task definition. CAPT creates it as a Task owned by the machine and
+	// deletes it with the machine. Its templates are rendered by Tinkerbell with v1alpha2
+	// data, such as {{ (index .hardware.spec.storageDevices 0).name }}.
+	// Mutually exclusive with TaskRef.
+	//
+	// +optional
+	TaskInline *tinkv2.TaskSpec `json:"taskInline,omitempty"`
+
+	// BootOptions are applied around this Task, as in a task of a v1alpha2 Workflow: the
+	// boot mode and netboot toggle before it, and netboot off, ISO eject and customboot post
+	// operations after it succeeds. When no entry of the list sets BootOptions, the first
+	// entry gets the machine's spec.bootOptions, with netboot toggled.
+	//
+	// +optional
+	BootOptions *tinkv2.BootOptions `json:"bootOptions,omitempty"`
+}
+
+// TaskRef references an existing Tinkerbell Task.
+type TaskRef struct {
+	// Name is the name of the Task.
+	Name string `json:"name"`
+
+	// Namespace is the namespace of the Task. Defaults to the Tinkerbell namespace, where
+	// the machine's Workflow is created.
+	//
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+}
 
 // TinkerbellResourceStatus describes the status of a Tinkerbell resource.
 type TinkerbellResourceStatus int

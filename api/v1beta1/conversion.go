@@ -86,15 +86,13 @@ func ConvertClusterToHub(src *TinkerbellCluster, dst *infrav2.TinkerbellCluster)
 	dst.Status.Initialization = convertClusterInitToHub(src.Status.Initialization)
 	dst.Status.Conditions = src.Status.Conditions
 
-	// Preserve v1beta1-only fields (imageLookup*) so a round-trip is lossless.
+	// Restore v1beta2-only fields stashed during a previous ConvertFrom.
 	restored := &infrav2.TinkerbellCluster{}
 	if ok, err := unmarshalData(src, restored); err != nil {
 		return err
 	} else if ok {
-		// Restore any hub-only fields that were stashed in a previous ConvertFrom.
-		// Currently there are no v1beta2-only fields on TinkerbellCluster,
-		// but this preserves the pattern for future additions.
-		_ = restored
+		// Restore hub-only fields that were stashed in a previous ConvertFrom.
+		dst.Spec.Tasks = restored.Spec.Tasks
 	}
 
 	return nil
@@ -150,6 +148,7 @@ func ConvertMachineToHub(src *TinkerbellMachine, dst *infrav2.TinkerbellMachine)
 	if ok, err := unmarshalData(src, restored); err != nil {
 		return err
 	} else if ok {
+		dst.Spec.Tasks = restored.Spec.Tasks
 		dst.Spec.TemplateRef = restored.Spec.TemplateRef
 		dst.Spec.AddressFromPool = restored.Spec.AddressFromPool
 	}
@@ -163,7 +162,7 @@ func ConvertMachineFromHub(dst *TinkerbellMachine, src *infrav2.TinkerbellMachin
 
 	// Spec — reverse renames.
 	dst.Spec.TemplateOverride = src.Spec.TemplateInline
-	// TemplateRef is v1beta2-only — stashed via MarshalData below.
+	// Tasks and TemplateRef are v1beta2-only — stashed via MarshalData below.
 	dst.Spec.HardwareAffinity = convertHardwareAffinityFromHub(src.Spec.HardwareAffinity)
 	dst.Spec.BootOptions = convertBootOptionsFromHub(src.Spec.BootOptions)
 	dst.Spec.HardwareName = src.Spec.HardwareName
@@ -202,6 +201,7 @@ func ConvertMachineTemplateToHub(src *TinkerbellMachineTemplate, dst *infrav2.Ti
 		return err
 	} else if ok {
 		dst.Spec.Template.ObjectMeta = restored.Spec.Template.ObjectMeta
+		dst.Spec.Template.Spec.Tasks = restored.Spec.Template.Spec.Tasks
 		dst.Spec.Template.Spec.TemplateRef = restored.Spec.Template.Spec.TemplateRef
 		dst.Spec.Template.Spec.AddressFromPool = restored.Spec.Template.Spec.AddressFromPool
 	}
@@ -218,7 +218,7 @@ func ConvertMachineTemplateFromHub(dst *TinkerbellMachineTemplate, src *infrav2.
 	// spec.template.metadata is v1beta2-only — stashed via marshalData.
 	srcSpec := src.Spec.Template.Spec
 	dst.Spec.Template.Spec.TemplateOverride = srcSpec.TemplateInline
-	// TemplateRef is v1beta2-only — stashed via MarshalData.
+	// Tasks and TemplateRef are v1beta2-only — stashed via MarshalData.
 	dst.Spec.Template.Spec.HardwareAffinity = convertHardwareAffinityFromHub(srcSpec.HardwareAffinity)
 	dst.Spec.Template.Spec.BootOptions = convertBootOptionsFromHub(srcSpec.BootOptions)
 

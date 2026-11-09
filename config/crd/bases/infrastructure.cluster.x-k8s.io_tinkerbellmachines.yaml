@@ -112,6 +112,44 @@ spec:
                                     boot device.
                                   type: boolean
                               type: object
+                            networkBootConfig:
+                              description: |-
+                                NetworkBootConfig enables/disables network boot protocol capabilities (UEFI HTTP Boot,
+                                legacy PXE) in BIOS/UEFI firmware, and/or sets the URL UEFI HTTP Boot fetches its boot
+                                image from. Support for the specific BMC vendor is implemented in bmclib.
+                              minProperties: 1
+                              properties:
+                                httpBootEnabled:
+                                  description: |-
+                                    HTTPBootEnabled enables (true) or disables (false) UEFI HTTP Boot capability, IPv4 and
+                                    IPv6 both.
+                                  type: boolean
+                                httpBootTLSMode:
+                                  description: |-
+                                    HTTPBootTLSMode sets the TLS authentication mode UEFI HTTP Boot uses to connect to the HTTP
+                                    boot server: "None" allows fetching the boot image over plain HTTP, "OneWay" requires HTTPS
+                                    with the server authenticated by the client. Some hardware defaults to "OneWay", which
+                                    rejects an HTTPBootURL that isn't HTTPS. Independent of HTTPBootEnabled and HTTPBootURL.
+                                  enum:
+                                  - None
+                                  - OneWay
+                                  type: string
+                                httpBootURL:
+                                  description: |-
+                                    HTTPBootURL sets the URL UEFI HTTP Boot fetches its boot image from, via the standard
+                                    Redfish ComputerSystem.Boot.HttpBootUri property. Independent of HTTPBootEnabled: setting
+                                    the URL does not enable the capability, and enabling the capability does not require a URL.
+                                  format: uri
+                                  type: string
+                                  x-kubernetes-validations:
+                                  - message: httpBootURL must be an http or https
+                                      URL
+                                    rule: self.startsWith('http://') || self.startsWith('https://')
+                                pxeBootEnabled:
+                                  description: PXEBootEnabled enables (true) or disables
+                                    (false) legacy PXE boot capability.
+                                  type: boolean
+                              type: object
                             oneTimeBootDeviceAction:
                               description: |-
                                 OneTimeBootDeviceAction represents a baseboard management one time set boot device operation.
@@ -190,6 +228,44 @@ spec:
                                   description: Persistent indicates whether the boot
                                     device should be set persistently as the first
                                     boot device.
+                                  type: boolean
+                              type: object
+                            networkBootConfig:
+                              description: |-
+                                NetworkBootConfig enables/disables network boot protocol capabilities (UEFI HTTP Boot,
+                                legacy PXE) in BIOS/UEFI firmware, and/or sets the URL UEFI HTTP Boot fetches its boot
+                                image from. Support for the specific BMC vendor is implemented in bmclib.
+                              minProperties: 1
+                              properties:
+                                httpBootEnabled:
+                                  description: |-
+                                    HTTPBootEnabled enables (true) or disables (false) UEFI HTTP Boot capability, IPv4 and
+                                    IPv6 both.
+                                  type: boolean
+                                httpBootTLSMode:
+                                  description: |-
+                                    HTTPBootTLSMode sets the TLS authentication mode UEFI HTTP Boot uses to connect to the HTTP
+                                    boot server: "None" allows fetching the boot image over plain HTTP, "OneWay" requires HTTPS
+                                    with the server authenticated by the client. Some hardware defaults to "OneWay", which
+                                    rejects an HTTPBootURL that isn't HTTPS. Independent of HTTPBootEnabled and HTTPBootURL.
+                                  enum:
+                                  - None
+                                  - OneWay
+                                  type: string
+                                httpBootURL:
+                                  description: |-
+                                    HTTPBootURL sets the URL UEFI HTTP Boot fetches its boot image from, via the standard
+                                    Redfish ComputerSystem.Boot.HttpBootUri property. Independent of HTTPBootEnabled: setting
+                                    the URL does not enable the capability, and enabling the capability does not require a URL.
+                                  format: uri
+                                  type: string
+                                  x-kubernetes-validations:
+                                  - message: httpBootURL must be an http or https
+                                      URL
+                                    rule: self.startsWith('http://') || self.startsWith('https://')
+                                pxeBootEnabled:
+                                  description: PXEBootEnabled enables (true) or disables
+                                    (false) legacy PXE boot capability.
                                   type: boolean
                               type: object
                             oneTimeBootDeviceAction:
@@ -671,7 +747,9 @@ spec:
                 - name
                 type: object
               bootOptions:
-                description: BootOptions are options that control the booting of Hardware.
+                description: |-
+                  BootOptions are options that control the booting of Hardware. They apply to a template,
+                  and to tasks whose entries set no bootOptions, where they go on the first entry.
                 properties:
                   bootMode:
                     description: BootMode is the type of booting that will be done.
@@ -715,6 +793,44 @@ spec:
                                   description: Persistent indicates whether the boot
                                     device should be set persistently as the first
                                     boot device.
+                                  type: boolean
+                              type: object
+                            networkBootConfig:
+                              description: |-
+                                NetworkBootConfig enables/disables network boot protocol capabilities (UEFI HTTP Boot,
+                                legacy PXE) in BIOS/UEFI firmware, and/or sets the URL UEFI HTTP Boot fetches its boot
+                                image from. Support for the specific BMC vendor is implemented in bmclib.
+                              minProperties: 1
+                              properties:
+                                httpBootEnabled:
+                                  description: |-
+                                    HTTPBootEnabled enables (true) or disables (false) UEFI HTTP Boot capability, IPv4 and
+                                    IPv6 both.
+                                  type: boolean
+                                httpBootTLSMode:
+                                  description: |-
+                                    HTTPBootTLSMode sets the TLS authentication mode UEFI HTTP Boot uses to connect to the HTTP
+                                    boot server: "None" allows fetching the boot image over plain HTTP, "OneWay" requires HTTPS
+                                    with the server authenticated by the client. Some hardware defaults to "OneWay", which
+                                    rejects an HTTPBootURL that isn't HTTPS. Independent of HTTPBootEnabled and HTTPBootURL.
+                                  enum:
+                                  - None
+                                  - OneWay
+                                  type: string
+                                httpBootURL:
+                                  description: |-
+                                    HTTPBootURL sets the URL UEFI HTTP Boot fetches its boot image from, via the standard
+                                    Redfish ComputerSystem.Boot.HttpBootUri property. Independent of HTTPBootEnabled: setting
+                                    the URL does not enable the capability, and enabling the capability does not require a URL.
+                                  format: uri
+                                  type: string
+                                  x-kubernetes-validations:
+                                  - message: httpBootURL must be an http or https
+                                      URL
+                                    rule: self.startsWith('http://') || self.startsWith('https://')
+                                pxeBootEnabled:
+                                  description: PXEBootEnabled enables (true) or disables
+                                    (false) legacy PXE boot capability.
                                   type: boolean
                               type: object
                             oneTimeBootDeviceAction:
@@ -795,6 +911,44 @@ spec:
                                   description: Persistent indicates whether the boot
                                     device should be set persistently as the first
                                     boot device.
+                                  type: boolean
+                              type: object
+                            networkBootConfig:
+                              description: |-
+                                NetworkBootConfig enables/disables network boot protocol capabilities (UEFI HTTP Boot,
+                                legacy PXE) in BIOS/UEFI firmware, and/or sets the URL UEFI HTTP Boot fetches its boot
+                                image from. Support for the specific BMC vendor is implemented in bmclib.
+                              minProperties: 1
+                              properties:
+                                httpBootEnabled:
+                                  description: |-
+                                    HTTPBootEnabled enables (true) or disables (false) UEFI HTTP Boot capability, IPv4 and
+                                    IPv6 both.
+                                  type: boolean
+                                httpBootTLSMode:
+                                  description: |-
+                                    HTTPBootTLSMode sets the TLS authentication mode UEFI HTTP Boot uses to connect to the HTTP
+                                    boot server: "None" allows fetching the boot image over plain HTTP, "OneWay" requires HTTPS
+                                    with the server authenticated by the client. Some hardware defaults to "OneWay", which
+                                    rejects an HTTPBootURL that isn't HTTPS. Independent of HTTPBootEnabled and HTTPBootURL.
+                                  enum:
+                                  - None
+                                  - OneWay
+                                  type: string
+                                httpBootURL:
+                                  description: |-
+                                    HTTPBootURL sets the URL UEFI HTTP Boot fetches its boot image from, via the standard
+                                    Redfish ComputerSystem.Boot.HttpBootUri property. Independent of HTTPBootEnabled: setting
+                                    the URL does not enable the capability, and enabling the capability does not require a URL.
+                                  format: uri
+                                  type: string
+                                  x-kubernetes-validations:
+                                  - message: httpBootURL must be an http or https
+                                      URL
+                                    rule: self.startsWith('http://') || self.startsWith('https://')
+                                pxeBootEnabled:
+                                  description: PXEBootEnabled enables (true) or disables
+                                    (false) legacy PXE boot capability.
                                   type: boolean
                               type: object
                             oneTimeBootDeviceAction:
@@ -1022,18 +1176,527 @@ spec:
                 maxLength: 512
                 minLength: 1
                 type: string
+              tasks:
+                description: |-
+                  Tasks are the Tinkerbell v1alpha2 Tasks run in order to provision this machine, each
+                  given inline or by reference. Takes precedence over hardware annotations and the
+                  cluster's tasks or template. Mutually exclusive with TemplateInline and TemplateRef.
+                items:
+                  description: |-
+                    MachineTask is one Task the machine's Workflow runs, given inline or by reference, with the
+                    boot options applied around it, as in a task of a Tinkerbell v1alpha2 Workflow.
+                  properties:
+                    bootOptions:
+                      description: |-
+                        BootOptions are applied around this Task, as in a task of a v1alpha2 Workflow: the
+                        boot mode and netboot toggle before it, and netboot off, ISO eject and customboot post
+                        operations after it succeeds. When no entry of the list sets BootOptions, the first
+                        entry gets the machine's spec.bootOptions, with netboot toggled.
+                      properties:
+                        bootMode:
+                          description: BootMode is the type of booting that will be
+                            done. One of "netboot", "isoboot", or "customboot".
+                          enum:
+                          - netboot
+                          - isoboot
+                          - customboot
+                          type: string
+                        customboot:
+                          description: |-
+                            Customboot is the configuration for the "customboot" boot mode.
+                            This allows users to define custom BMC Operations for pre and post a Task.
+                          properties:
+                            postOperations:
+                              description: |-
+                                PostOperations are the BMC operations that will be run after all Task Actions have completed.
+                                In most cases these operations should get a machine into a state where it can be powered off or rebooted and remove any mounted virtual media.
+                                These operations will be run only if all the associated Task Actions complete successfully.
+                              items:
+                                description: |-
+                                  Operations defines the operations that can be performed against a BMC.
+                                  Only a single field in the struct should be defined at any given time
+                                  as only one operation can be performed at a time.
+                                  For example either PowerAction or BootDevice.
+                                properties:
+                                  bootDevice:
+                                    description: BootDevice is the device to set as
+                                      the first boot device on the Machine.
+                                    properties:
+                                      efiBoot:
+                                        description: EFIBoot indicates whether the
+                                          boot device should be set to efiboot mode.
+                                        type: boolean
+                                      name:
+                                        description: Name is the name of the device
+                                          to set as the first boot device.
+                                        type: string
+                                      persistent:
+                                        description: Persistent indicates whether
+                                          the boot device should be set persistently
+                                          as the first boot device.
+                                        type: boolean
+                                    type: object
+                                  networkBootConfig:
+                                    description: |-
+                                      NetworkBootConfig enables/disables network boot protocol capabilities (UEFI HTTP Boot,
+                                      legacy PXE) in BIOS/UEFI firmware, and/or sets the URL UEFI HTTP Boot fetches its boot
+                                      image from. Support for the specific BMC vendor is implemented in bmclib.
+                                    minProperties: 1
+                                    properties:
+                                      httpBootEnabled:
+                                        description: |-
+                                          HTTPBootEnabled enables (true) or disables (false) UEFI HTTP Boot capability, IPv4 and
+                                          IPv6 both.
+                                        type: boolean
+                                      httpBootTLSMode:
+                                        description: |-
+                                          HTTPBootTLSMode sets the TLS authentication mode UEFI HTTP Boot uses to connect to the HTTP
+                                          boot server: "None" allows fetching the boot image over plain HTTP, "OneWay" requires HTTPS
+                                          with the server authenticated by the client. Some hardware defaults to "OneWay", which
+                                          rejects an HTTPBootURL that isn't HTTPS. Independent of HTTPBootEnabled and HTTPBootURL.
+                                        enum:
+                                        - None
+                                        - OneWay
+                                        type: string
+                                      httpBootURL:
+                                        description: |-
+                                          HTTPBootURL sets the URL UEFI HTTP Boot fetches its boot image from, via the standard
+                                          Redfish ComputerSystem.Boot.HttpBootUri property. Independent of HTTPBootEnabled: setting
+                                          the URL does not enable the capability, and enabling the capability does not require a URL.
+                                        format: uri
+                                        type: string
+                                        x-kubernetes-validations:
+                                        - message: httpBootURL must be an http or
+                                            https URL
+                                          rule: self.startsWith('http://') || self.startsWith('https://')
+                                      pxeBootEnabled:
+                                        description: PXEBootEnabled enables (true)
+                                          or disables (false) legacy PXE boot capability.
+                                        type: boolean
+                                    type: object
+                                  powerAction:
+                                    allOf:
+                                    - enum:
+                                      - "on"
+                                      - "off"
+                                      - soft
+                                      - status
+                                      - cycle
+                                      - reset
+                                    - enum:
+                                      - "on"
+                                      - "off"
+                                      - soft
+                                      - status
+                                      - cycle
+                                      - reset
+                                    description: PowerAction represents a baseboard
+                                      management power operation.
+                                    type: string
+                                  timeoutSeconds:
+                                    description: |-
+                                      TimeoutSeconds defines the maximum time in seconds the Operation is allowed to run.
+                                      If not defined, the default from the runtime is used.
+                                    format: int64
+                                    type: integer
+                                  virtualMediaAction:
+                                    description: VirtualMediaAction represents a baseboard
+                                      management virtual media insert/eject.
+                                    properties:
+                                      kind:
+                                        description: Kind represents the kind of virtual
+                                          media.
+                                        type: string
+                                      mediaURL:
+                                        description: mediaURL represents the URL of
+                                          the image to be inserted into the virtual
+                                          media, or empty to eject media.
+                                        type: string
+                                    required:
+                                    - kind
+                                    type: object
+                                type: object
+                                x-kubernetes-validations:
+                                - message: only one of powerAction, bootDevice, virtualMediaAction,
+                                    or networkBootConfig can be specified
+                                  rule: '(has(self.powerAction) ? 1 : 0) + (has(self.bootDevice)
+                                    ? 1 : 0) + (has(self.virtualMediaAction) ? 1 :
+                                    0) + (has(self.networkBootConfig) ? 1 : 0) ==
+                                    1'
+                              type: array
+                            preOperations:
+                              description: |-
+                                PreOperations are the BMC operations that will be run before any Task Actions.
+                                In most cases these operations should get a machine into a state where a Tink Agent is running.
+                              items:
+                                description: |-
+                                  Operations defines the operations that can be performed against a BMC.
+                                  Only a single field in the struct should be defined at any given time
+                                  as only one operation can be performed at a time.
+                                  For example either PowerAction or BootDevice.
+                                properties:
+                                  bootDevice:
+                                    description: BootDevice is the device to set as
+                                      the first boot device on the Machine.
+                                    properties:
+                                      efiBoot:
+                                        description: EFIBoot indicates whether the
+                                          boot device should be set to efiboot mode.
+                                        type: boolean
+                                      name:
+                                        description: Name is the name of the device
+                                          to set as the first boot device.
+                                        type: string
+                                      persistent:
+                                        description: Persistent indicates whether
+                                          the boot device should be set persistently
+                                          as the first boot device.
+                                        type: boolean
+                                    type: object
+                                  networkBootConfig:
+                                    description: |-
+                                      NetworkBootConfig enables/disables network boot protocol capabilities (UEFI HTTP Boot,
+                                      legacy PXE) in BIOS/UEFI firmware, and/or sets the URL UEFI HTTP Boot fetches its boot
+                                      image from. Support for the specific BMC vendor is implemented in bmclib.
+                                    minProperties: 1
+                                    properties:
+                                      httpBootEnabled:
+                                        description: |-
+                                          HTTPBootEnabled enables (true) or disables (false) UEFI HTTP Boot capability, IPv4 and
+                                          IPv6 both.
+                                        type: boolean
+                                      httpBootTLSMode:
+                                        description: |-
+                                          HTTPBootTLSMode sets the TLS authentication mode UEFI HTTP Boot uses to connect to the HTTP
+                                          boot server: "None" allows fetching the boot image over plain HTTP, "OneWay" requires HTTPS
+                                          with the server authenticated by the client. Some hardware defaults to "OneWay", which
+                                          rejects an HTTPBootURL that isn't HTTPS. Independent of HTTPBootEnabled and HTTPBootURL.
+                                        enum:
+                                        - None
+                                        - OneWay
+                                        type: string
+                                      httpBootURL:
+                                        description: |-
+                                          HTTPBootURL sets the URL UEFI HTTP Boot fetches its boot image from, via the standard
+                                          Redfish ComputerSystem.Boot.HttpBootUri property. Independent of HTTPBootEnabled: setting
+                                          the URL does not enable the capability, and enabling the capability does not require a URL.
+                                        format: uri
+                                        type: string
+                                        x-kubernetes-validations:
+                                        - message: httpBootURL must be an http or
+                                            https URL
+                                          rule: self.startsWith('http://') || self.startsWith('https://')
+                                      pxeBootEnabled:
+                                        description: PXEBootEnabled enables (true)
+                                          or disables (false) legacy PXE boot capability.
+                                        type: boolean
+                                    type: object
+                                  powerAction:
+                                    allOf:
+                                    - enum:
+                                      - "on"
+                                      - "off"
+                                      - soft
+                                      - status
+                                      - cycle
+                                      - reset
+                                    - enum:
+                                      - "on"
+                                      - "off"
+                                      - soft
+                                      - status
+                                      - cycle
+                                      - reset
+                                    description: PowerAction represents a baseboard
+                                      management power operation.
+                                    type: string
+                                  timeoutSeconds:
+                                    description: |-
+                                      TimeoutSeconds defines the maximum time in seconds the Operation is allowed to run.
+                                      If not defined, the default from the runtime is used.
+                                    format: int64
+                                    type: integer
+                                  virtualMediaAction:
+                                    description: VirtualMediaAction represents a baseboard
+                                      management virtual media insert/eject.
+                                    properties:
+                                      kind:
+                                        description: Kind represents the kind of virtual
+                                          media.
+                                        type: string
+                                      mediaURL:
+                                        description: mediaURL represents the URL of
+                                          the image to be inserted into the virtual
+                                          media, or empty to eject media.
+                                        type: string
+                                    required:
+                                    - kind
+                                    type: object
+                                type: object
+                                x-kubernetes-validations:
+                                - message: only one of powerAction, bootDevice, virtualMediaAction,
+                                    or networkBootConfig can be specified
+                                  rule: '(has(self.powerAction) ? 1 : 0) + (has(self.bootDevice)
+                                    ? 1 : 0) + (has(self.virtualMediaAction) ? 1 :
+                                    0) + (has(self.networkBootConfig) ? 1 : 0) ==
+                                    1'
+                              type: array
+                          type: object
+                        isoURL:
+                          description: |-
+                            ISOURL is the URL of the ISO that will be one-time booted.
+                            When this field is set, a job.bmc.tinkerbell.org object will be created
+                            for getting the associated Hardware into a CDROM booting state.
+                            A Workflow Hardware Reference that contains a bmc must be provided.
+                            BootMode must be set to "isoboot".
+                          format: uri
+                          type: string
+                        toggleNetboot:
+                          description: |-
+                            ToggleNetboot indicates whether the the field in the associated Hardware for allowing network booting should
+                            be enabled before the Task is executed and disabled after the Task has completed successfully.
+                            A Hardware Reference must be provided.
+                          type: boolean
+                      type: object
+                    name:
+                      description: |-
+                        Name identifies the entry. A Task CAPT creates from TaskInline is named
+                        <machine name>-<name>.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    taskInline:
+                      description: |-
+                        TaskInline is a Task definition. CAPT creates it as a Task owned by the machine and
+                        deletes it with the machine. Its templates are rendered by Tinkerbell with v1alpha2
+                        data, such as {{ (index .hardware.spec.storageDevices 0).name }}.
+                        Mutually exclusive with TaskRef.
+                      properties:
+                        actions:
+                          description: Actions are the list of individual Actions
+                            that are part of this Task.
+                          items:
+                            description: Action represents a Task Action.
+                            properties:
+                              args:
+                                description: Args are a set of arguments to be passed
+                                  to the command executed by the container on launch.
+                                items:
+                                  type: string
+                                type: array
+                              background:
+                                description: |-
+                                  Background or Detach indicates that the Action should be run in the background and not block the execution of other Actions.
+                                  The Action will report back as successful before the Action is executed in the background.
+                                  Then the Action will be run in the background and move on to the next Action immediately without waiting for completion.
+                                  This is useful for Actions that do things like kexec, reboot, or power off a machine.
+                                type: boolean
+                              command:
+                                description: |-
+                                  Command defines the command to use when launching the image. It overrides the default command
+                                  (entrypoint) of the Action image. It is the path to an executable program, or a program name
+                                  resolved through the image's PATH, as Docker does. When omitted, the image's default
+                                  command/entrypoint is used.
+                                pattern: ^\S+$
+                                type: string
+                              env:
+                                additionalProperties:
+                                  type: string
+                                description: Env defines environment variables that
+                                  will be available inside a container.
+                                type: object
+                              if:
+                                description: |-
+                                  If determines whether the Action is executed. It is a string boolean:
+                                  the rendered value must be "true", "false", or "" (empty). Empty or
+                                  unset is treated as true. Rendered values other than "true", "false",
+                                  or "" are treated as false. The "true" and "false" values are case-insensitive,
+                                  so "True", "TRUE", "False", "FALSE" are all valid.
+
+                                  The value is typically a Go template that evaluates to the boolean, e.g.
+                                  "{{ eq .hardware.spec.arch \"amd64\" }}". Templating runs before
+                                  the result is parsed, so the template output — not the raw field — is what
+                                  must resolve to true/false/"".
+                                type: string
+                              image:
+                                description: |-
+                                  Image is an OCI image. Should generally be a fully qualified OCI image reference.
+                                  For example, quay.io/tinkerbell/actions/image2disk:v1.0.0 or docker.io/library/alpine:3.23
+                                type: string
+                              name:
+                                description: Name is a human readable name for the
+                                  Action.
+                                type: string
+                              namespaces:
+                                description: Namespaces defines the Linux namespaces
+                                  with which the container should configured.
+                                properties:
+                                  network:
+                                    description: Network defines the network namespace.
+                                    type: string
+                                  pid:
+                                    description: PID defines the PID namespace
+                                    type: string
+                                type: object
+                              retries:
+                                description: |-
+                                  Retries is the number of times the Action should be run until completed successfully.
+                                  Zero value means no retries.
+                                minimum: 0
+                                type: integer
+                              timeoutSeconds:
+                                description: |-
+                                  TimeoutSeconds is the total number of seconds the Action is allowed to run without completing
+                                  before marking it as timed out.
+                                  This includes all retries.
+                                format: int64
+                                type: integer
+                              volumes:
+                                description: Volumes defines the volumes that will
+                                  be mounted into the container.
+                                items:
+                                  description: "Volume is a specification for mounting
+                                    a location on a Host into an Action container.\nVolumes
+                                    take the form {SRC-VOLUME-NAME | SRC-HOST-DIR}:TGT-CONTAINER-DIR:OPTIONS.\nWhen
+                                    specifying a VOLUME-NAME that does not exist it
+                                    will be created for you.\nExamples:\n\nRead-only
+                                    bind mount bound to /data\n\n\t/etc/data:/data:ro\n\nWritable
+                                    volume name bound to /data\n\n\tshared_volume:/data\n\nSee
+                                    https://docs.docker.com/storage/volumes/ for additional
+                                    details."
+                                  type: string
+                                type: array
+                            required:
+                            - image
+                            - name
+                            type: object
+                          type: array
+                        env:
+                          additionalProperties:
+                            type: string
+                          description: Env variables here are added to all Actions
+                            in the Task.
+                          type: object
+                        references:
+                          additionalProperties:
+                            description: Reference identifies a Kubernetes object,
+                              of any kind, whose contents are made available to templating.
+                            properties:
+                              group:
+                                description: |-
+                                  Group of the referent. Empty for the core API group.
+                                  More info: https://kubernetes.io/docs/reference/using-api/#api-groups
+                                type: string
+                              name:
+                                description: |-
+                                  Name of the referent.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              namespace:
+                                description: |-
+                                  Namespace of the referent. Leave empty for cluster-scoped resources.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                                type: string
+                              resource:
+                                description: |-
+                                  Resource of the referent. Must be the pluralized kind of the referent. Must be all lowercase.
+                                  More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                                type: string
+                              version:
+                                description: |-
+                                  API version of the referent.
+                                  More info: https://kubernetes.io/docs/reference/using-api/#api-versioning
+                                type: string
+                            required:
+                            - name
+                            - resource
+                            - version
+                            type: object
+                          description: |-
+                            References are dynamic and defined by the user.
+                            These will be available to use in Actions as template dot notation.
+
+                            For example, given the following reference:
+
+                            References:
+                              config:
+                                name: my-config
+                                namespace: tinkerbell
+                                resource: configmaps
+                                version: v1
+
+                            The following Action template string can be used access the reference:
+
+                            {{ .references.config.data.my-key }}
+                          type: object
+                        vars:
+                          additionalProperties:
+                            type: string
+                          description: Vars are custom variables that can be filled
+                            with arbitrary key-value pairs.
+                          type: object
+                        volumes:
+                          description: Volumes defined here are added to all Actions
+                            in the Task.
+                          items:
+                            description: "Volume is a specification for mounting a
+                              location on a Host into an Action container.\nVolumes
+                              take the form {SRC-VOLUME-NAME | SRC-HOST-DIR}:TGT-CONTAINER-DIR:OPTIONS.\nWhen
+                              specifying a VOLUME-NAME that does not exist it will
+                              be created for you.\nExamples:\n\nRead-only bind mount
+                              bound to /data\n\n\t/etc/data:/data:ro\n\nWritable volume
+                              name bound to /data\n\n\tshared_volume:/data\n\nSee
+                              https://docs.docker.com/storage/volumes/ for additional
+                              details."
+                            type: string
+                          type: array
+                      required:
+                      - actions
+                      type: object
+                    taskRef:
+                      description: |-
+                        TaskRef names an existing Task. CAPT never creates, changes or deletes it.
+                        Mutually exclusive with TaskInline.
+                      properties:
+                        name:
+                          description: Name is the name of the Task.
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace is the namespace of the Task. Defaults to the Tinkerbell namespace, where
+                            the machine's Workflow is created.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: exactly one of taskRef and taskInline must be set
+                    rule: has(self.taskRef) != has(self.taskInline)
+                maxItems: 32
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               templateInline:
                 description: |-
                   TemplateInline is an inline Tinkerbell Template definition for this machine.
                   Takes precedence over hardware annotations and cluster-level templates.
-                  Mutually exclusive with TemplateRef.
+                  Mutually exclusive with Tasks and TemplateRef.
+
+                  Deprecated: use tasks.
                 type: string
               templateRef:
                 description: |-
                   TemplateRef is a reference to an existing Tinkerbell Template object whose spec.data will
                   be used as the template for this machine. Takes precedence over hardware annotations and
-                  cluster-level templates. Mutually exclusive with TemplateInline.
+                  cluster-level templates. Mutually exclusive with Tasks and TemplateInline.
                   When Namespace is omitted, defaults to the Hardware's namespace.
+
+                  Deprecated: use tasks.
                 properties:
                   name:
                     description: Name is the name of the object.
@@ -1046,8 +1709,10 @@ spec:
                 type: object
             type: object
             x-kubernetes-validations:
-            - message: templateInline and templateRef are mutually exclusive
-              rule: '!has(self.templateInline) || !has(self.templateRef)'
+            - message: at most one of tasks, templateInline and templateRef may be
+                set
+              rule: '[has(self.tasks), has(self.templateInline), has(self.templateRef)].filter(x,
+                x).size() <= 1'
           status:
             description: TinkerbellMachineStatus defines the observed state of TinkerbellMachine.
             properties:

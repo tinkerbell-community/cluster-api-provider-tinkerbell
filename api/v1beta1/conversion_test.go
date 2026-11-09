@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	"k8s.io/apimachinery/pkg/api/apitesting/fuzzer"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtimeserializer "k8s.io/apimachinery/pkg/runtime/serializer"
@@ -59,6 +60,14 @@ func v1beta1FuzzerFuncs(_ runtimeserializer.CodecFactory) []interface{} {
 			spec.ImageLookupBaseRegistry = ""
 			spec.ImageLookupOSDistro = ""
 			spec.ImageLookupOSVersion = ""
+		},
+		// Tinkerbell's Customboot is omitted from JSON when it has no operations (omitzero with
+		// an IsZero method), so an empty one reads back as nil, as it does from the API server.
+		func(b *tinkv2.BootOptions, c randfill.Continue) {
+			c.FillNoCustom(b)
+			if b.Customboot != nil && b.Customboot.IsZero() {
+				b.Customboot = nil
+			}
 		},
 		func(res *TinkerbellMachineTemplateResource, c randfill.Continue) {
 			c.FillNoCustom(res)
@@ -223,6 +232,89 @@ func TestFuzzyConversion(t *testing.T) {
 			if diff := cmp.Diff(hub, result, cmpOpts); diff != "" {
 				t.Errorf("hub-spoke-hub round-trip mismatch (-want +got):\n%s", diff)
 			}
+		}
+	})
+}
+
+// sampleTasks is a tasks list with an inline entry carrying boot options and a reference.
+func sampleTasks() []infrav2.MachineTask {
+	return []infrav2.MachineTask{
+		{
+			Name:        "install",
+			BootOptions: &tinkv2.BootOptions{ToggleNetboot: true, BootMode: tinkv2.BootModeNetboot},
+			TaskInline: &tinkv2.TaskSpec{Actions: []tinkv2.Action{
+				{Name: "stream-image", Image: "quay.io/tinkerbell/actions/image2disk:latest"},
+			}},
+		},
+		{Name: "shared", TaskRef: &infrav2.TaskRef{Name: "shared", Namespace: "tink"}},
+	}
+}
+
+// TestTasksSurviveRoundTrip checks that the v1beta2-only tasks field survives a trip through
+// v1beta1, which has no such field, for every kind that carries it.
+func TestTasksSurviveRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("TinkerbellMachine", func(t *testing.T) {
+		t.Parallel()
+
+		want := &infrav2.TinkerbellMachine{}
+		want.Spec.Tasks = sampleTasks()
+
+		spoke := &TinkerbellMachine{}
+		if err := ConvertMachineFromHub(spoke, want); err != nil {
+			t.Fatalf("ConvertMachineFromHub: %v", err)
+		}
+
+		got := &infrav2.TinkerbellMachine{}
+		if err := ConvertMachineToHub(spoke, got); err != nil {
+			t.Fatalf("ConvertMachineToHub: %v", err)
+		}
+
+		if diff := cmp.Diff(want.Spec, got.Spec, cmpOpts); diff != "" {
+			t.Errorf("tasks lost in the round trip (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("TinkerbellMachineTemplate", func(t *testing.T) {
+		t.Parallel()
+
+		want := &infrav2.TinkerbellMachineTemplate{}
+		want.Spec.Template.Spec.Tasks = sampleTasks()
+
+		spoke := &TinkerbellMachineTemplate{}
+		if err := ConvertMachineTemplateFromHub(spoke, want); err != nil {
+			t.Fatalf("ConvertMachineTemplateFromHub: %v", err)
+		}
+
+		got := &infrav2.TinkerbellMachineTemplate{}
+		if err := ConvertMachineTemplateToHub(spoke, got); err != nil {
+			t.Fatalf("ConvertMachineTemplateToHub: %v", err)
+		}
+
+		if diff := cmp.Diff(want.Spec.Template.Spec, got.Spec.Template.Spec, cmpOpts); diff != "" {
+			t.Errorf("tasks lost in the round trip (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("TinkerbellCluster", func(t *testing.T) {
+		t.Parallel()
+
+		want := &infrav2.TinkerbellCluster{}
+		want.Spec.Tasks = sampleTasks()
+
+		spoke := &TinkerbellCluster{}
+		if err := ConvertClusterFromHub(spoke, want); err != nil {
+			t.Fatalf("ConvertClusterFromHub: %v", err)
+		}
+
+		got := &infrav2.TinkerbellCluster{}
+		if err := ConvertClusterToHub(spoke, got); err != nil {
+			t.Fatalf("ConvertClusterToHub: %v", err)
+		}
+
+		if diff := cmp.Diff(want.Spec, got.Spec, cmpOpts); diff != "" {
+			t.Errorf("tasks lost in the round trip (-want +got):\n%s", diff)
 		}
 	})
 }

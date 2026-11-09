@@ -37,7 +37,7 @@ const (
 )
 
 // TinkerbellClusterSpec defines the desired state of TinkerbellCluster.
-// +kubebuilder:validation:XValidation:rule="!has(self.templateInline) || !has(self.templateRef)",message="templateInline and templateRef are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="[has(self.tasks), has(self.templateInline), has(self.templateRef)].filter(x, x).size() <= 1",message="at most one of tasks, templateInline and templateRef may be set"
 type TinkerbellClusterSpec struct {
 	// ControlPlaneEndpoint is the address of the cluster control plane.
 	// When not set, it is populated from the owning Cluster's spec.
@@ -48,17 +48,33 @@ type TinkerbellClusterSpec struct {
 	// +optional
 	ControlPlaneEndpoint *clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty,omitzero"`
 
+	// Tasks are the Tinkerbell v1alpha2 Tasks run in order to provision every machine in the
+	// cluster, each given inline or by reference. A machine's own tasks or template, or its
+	// Hardware's annotations, take precedence. Mutually exclusive with TemplateInline and
+	// TemplateRef.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
+	Tasks []MachineTask `json:"tasks,omitempty"`
+
 	// TemplateInline is an inline Tinkerbell Template definition applied to all machines in the
 	// cluster. If a Machine specifies its own template, the Machine's template takes precedence.
-	// Mutually exclusive with TemplateRef.
+	// Mutually exclusive with Tasks and TemplateRef.
+	//
+	// Deprecated: use tasks.
 	//
 	// +optional
 	TemplateInline string `json:"templateInline,omitempty"`
 
 	// TemplateRef is a reference to an existing Tinkerbell Template object whose spec.data will
 	// be used as the template for all machines in the cluster. If a Machine specifies its own
-	// template, the Machine's template takes precedence. Mutually exclusive with TemplateInline.
-	// When Namespace is omitted, defaults to the Hardware's namespace.
+	// template, the Machine's template takes precedence. Mutually exclusive with Tasks and
+	// TemplateInline. When Namespace is omitted, defaults to the Hardware's namespace.
+	//
+	// Deprecated: use tasks.
 	//
 	// +optional
 	TemplateRef *ObjectRef `json:"templateRef,omitempty"`

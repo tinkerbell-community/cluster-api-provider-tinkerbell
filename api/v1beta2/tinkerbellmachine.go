@@ -42,19 +42,34 @@ const (
 // should be provisioned. These fields are safe to set in a TinkerbellMachineTemplate
 // and will be copied into each TinkerbellMachine created from the template.
 //
-// +kubebuilder:validation:XValidation:rule="!has(self.templateInline) || !has(self.templateRef)",message="templateInline and templateRef are mutually exclusive"
+// +kubebuilder:validation:XValidation:rule="[has(self.tasks), has(self.templateInline), has(self.templateRef)].filter(x, x).size() <= 1",message="at most one of tasks, templateInline and templateRef may be set"
 type TinkerbellMachineConfig struct {
+	// Tasks are the Tinkerbell v1alpha2 Tasks run in order to provision this machine, each
+	// given inline or by reference. Takes precedence over hardware annotations and the
+	// cluster's tasks or template. Mutually exclusive with TemplateInline and TemplateRef.
+	//
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
+	Tasks []MachineTask `json:"tasks,omitempty"`
+
 	// TemplateInline is an inline Tinkerbell Template definition for this machine.
 	// Takes precedence over hardware annotations and cluster-level templates.
-	// Mutually exclusive with TemplateRef.
+	// Mutually exclusive with Tasks and TemplateRef.
+	//
+	// Deprecated: use tasks.
 	//
 	// +optional
 	TemplateInline string `json:"templateInline,omitempty"`
 
 	// TemplateRef is a reference to an existing Tinkerbell Template object whose spec.data will
 	// be used as the template for this machine. Takes precedence over hardware annotations and
-	// cluster-level templates. Mutually exclusive with TemplateInline.
+	// cluster-level templates. Mutually exclusive with Tasks and TemplateInline.
 	// When Namespace is omitted, defaults to the Hardware's namespace.
+	//
+	// Deprecated: use tasks.
 	//
 	// +optional
 	TemplateRef *ObjectRef `json:"templateRef,omitempty"`
@@ -63,7 +78,8 @@ type TinkerbellMachineConfig struct {
 	// +optional
 	HardwareAffinity *HardwareAffinity `json:"hardwareAffinity,omitempty"`
 
-	// BootOptions are options that control the booting of Hardware.
+	// BootOptions are options that control the booting of Hardware. They apply to a template,
+	// and to tasks whose entries set no bootOptions, where they go on the first entry.
 	// +optional
 	BootOptions BootOptions `json:"bootOptions,omitempty"`
 
