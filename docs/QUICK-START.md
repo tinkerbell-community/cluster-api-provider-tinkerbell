@@ -375,6 +375,9 @@ Tinkerbell renders the Tasks' Go templates with `v1alpha2` data when the Workflo
 | `{{ .metadata_url }}` | The metadata URL Tinkerbell is configured with |
 | `{{ .workflow.spec.globals.templateMap.device_1 }}` | The machine's Agent ID (the Hardware's `spec.instance.lookupID`, or `spec.agentID`) |
 
+Set `timeoutSeconds` on every action: Tinkerbell's agent (v0.28.6) gives an action without one
+no time at all, so it fails at once and the Workflow ends in `Timeout`.
+
 A Task does not name a worker: CAPT runs every entry on the machine's Hardware and Agent. If
 Tinkerbell cannot render a Task (for example, because it still uses `v1alpha1` syntax), CAPT
 records a `WorkflowNotRendered` warning on the `TinkerbellMachine` with Tinkerbell's reason.
