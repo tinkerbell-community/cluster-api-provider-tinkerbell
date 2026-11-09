@@ -55,6 +55,9 @@ func Test_validateSource(t *testing.T) {
 	both := inline()
 	both.TaskRef = &infrastructurev1.TaskRef{Name: "shared"}
 
+	withRefs := inline()
+	withRefs.TaskInline.References = map[string]tinkv2.Reference{"secret": {Name: "s", Resource: "secrets", Version: "v1"}}
+
 	for _, tt := range []struct {
 		name           string
 		tasks          []infrastructurev1.MachineTask
@@ -86,6 +89,13 @@ func Test_validateSource(t *testing.T) {
 			name:  "entry with neither",
 			tasks: []infrastructurev1.MachineTask{{Name: "a"}},
 			want:  []field.ErrorType{field.ErrorTypeInvalid},
+		},
+		{
+			// A Task's references read other objects with the access Tinkerbell's Policy gives
+			// Tasks; CAPT must not create them for whoever can write a machine.
+			name:  "inline task with references",
+			tasks: []infrastructurev1.MachineTask{withRefs},
+			want:  []field.ErrorType{field.ErrorTypeForbidden},
 		},
 		{
 			name:  "duplicate names",

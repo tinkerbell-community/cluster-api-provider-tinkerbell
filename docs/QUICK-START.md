@@ -271,7 +271,8 @@ the cluster or machine level (or name Tasks on the Hardware, see below).
 one of:
 
 - `taskInline`: a Task definition. CAPT creates it as a Task named `<machine>-<name>`, owned by
-  the machine and deleted with it.
+  the machine and deleted with it. It cannot set `references`: those read other objects with the
+  access Tinkerbell's Policy gives Tasks, so put them in a Task you manage and use `taskRef`.
 - `taskRef`: an existing Task you manage (`name`, optional `namespace`, defaulting to the
   namespace the machine's Workflow is created in). CAPT never creates, changes or deletes it.
 

@@ -130,6 +130,9 @@ func rejectedObjects() []rejectedObject {
 	both := inlineEntry("a")
 	both.TaskRef = &v1beta2.TaskRef{Name: "shared"}
 
+	withRefs := inlineEntry("a")
+	withRefs.TaskInline.References = map[string]tinkv2.Reference{"secret": {Name: "s", Resource: "secrets", Version: "v1"}}
+
 	return []rejectedObject{
 		{
 			name: "machine with tasks and templateInline",
@@ -158,6 +161,11 @@ func rejectedObjects() []rejectedObject {
 			name: "two entries with the same name",
 			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Tasks: []v1beta2.MachineTask{inlineEntry("a"), refEntry("a", "shared")}}),
 			want: "Duplicate value",
+		},
+		{
+			name: "inline task with references",
+			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Tasks: []v1beta2.MachineTask{withRefs}}),
+			want: "taskInline cannot set references",
 		},
 		{
 			name: "entry with the legacy iso boot mode",

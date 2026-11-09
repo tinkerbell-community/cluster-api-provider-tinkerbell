@@ -25,6 +25,7 @@ import (
 // boot options applied around it, as in a task of a Tinkerbell v1alpha2 Workflow.
 //
 // +kubebuilder:validation:XValidation:rule="has(self.taskRef) != has(self.taskInline)",message="exactly one of taskRef and taskInline must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.taskInline) || !has(self.taskInline.references)",message="taskInline cannot set references; reference a Task you manage with taskRef instead"
 type MachineTask struct {
 	// Name identifies the entry. A Task CAPT creates from TaskInline is named
 	// <machine name>-<name>.
@@ -41,8 +42,10 @@ type MachineTask struct {
 
 	// TaskInline is a Task definition. CAPT creates it as a Task owned by the machine and
 	// deletes it with the machine. Its templates are rendered by Tinkerbell with v1alpha2
-	// data, such as {{ (index .hardware.spec.storageDevices 0).name }}.
-	// Mutually exclusive with TaskRef.
+	// data, such as {{ (index .hardware.spec.storageDevices 0).name }}. It cannot set
+	// references: those read other objects with the access Tinkerbell's Policy gives Tasks,
+	// which CAPT does not grant to whoever can write a machine; put them in a Task you
+	// manage and use TaskRef. Mutually exclusive with TaskRef.
 	//
 	// +optional
 	TaskInline *tinkv2.TaskSpec `json:"taskInline,omitempty"`
