@@ -28,6 +28,7 @@ Machines provisioned from `tasks` never need the Template CRD.
 
 | CAPT | Tinkerbell (tinkerbell-community) |
 | ---- | --------------------------------- |
+| v0.10.0 | v0.27.0 or later (tested with v0.28.6); adds `tasks`, which needs Tinkerbell's `v1alpha2` Task CRD |
 | v0.9.2 | v0.27.0 or later; needed for a Tinkerbell without the Template CRD |
 | v0.9.1 | v0.27.0 or later |
 | v0.9.0 | v0.27.x |
