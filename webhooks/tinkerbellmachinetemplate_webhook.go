@@ -76,8 +76,11 @@ func validateMachineTemplateSource(tmt *infrastructurev1.TinkerbellMachineTempla
 	path := field.NewPath("spec", "template", "spec")
 	spec := tmt.Spec.Template.Spec
 
+	errs := validateSource(path, spec.Tasks, spec.TemplateInline, spec.TemplateRef)
+	errs = append(errs, validateReferences(path, tmt.Namespace, &spec)...)
+
 	return deprecationWarnings(path, spec.TemplateInline, spec.TemplateRef),
-		aggregateObjErrors(tmt.GroupVersionKind().GroupKind(), tmt.Name, validateSource(path, spec.Tasks, spec.TemplateInline, spec.TemplateRef))
+		aggregateObjErrors(tmt.GroupVersionKind().GroupKind(), tmt.Name, errs)
 }
 
 // ValidateDelete implements admission.Validator.

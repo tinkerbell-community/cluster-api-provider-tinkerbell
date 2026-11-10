@@ -76,6 +76,41 @@ type TaskRef struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// WorkflowReference names an object the machine's Workflow reads, in the format of a Tinkerbell
+// v1alpha2 Reference. Name and Namespace are templates CAPT renders with the machine's
+// variables: machine_name, machine_namespace, cluster_name, bootstrap_config_name,
+// tinkerbell_machine_name, hardware_name and hardware_namespace. They may hold only literal
+// text and {{ .variable }} substitutions.
+type WorkflowReference struct {
+	// Group of the object; empty for the core API group. Not templated.
+	//
+	// +optional
+	Group string `json:"group,omitempty"`
+
+	// Version of the object's API. Not templated.
+	//
+	// +kubebuilder:validation:MinLength=1
+	Version string `json:"version"`
+
+	// Resource is the object's lowercase plural resource name. Not templated.
+	//
+	// +kubebuilder:validation:MinLength=1
+	Resource string `json:"resource"`
+
+	// Name of the object, as a template of literal text and {{ .variable }} substitutions.
+	//
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
+	Name string `json:"name"`
+
+	// Namespace of the object, as a template of literal text and {{ .variable }}
+	// substitutions. Defaults to the machine's namespace, and must resolve to it.
+	//
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // TinkerbellResourceStatus describes the status of a Tinkerbell resource.
 type TinkerbellResourceStatus int
 

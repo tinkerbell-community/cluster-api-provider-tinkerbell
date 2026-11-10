@@ -20,6 +20,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
@@ -218,7 +219,7 @@ func (scope *machineReconcileScope) defaultBootOptions(hw *tinkv2.Hardware) (*ti
 // tasks, in order, on hw. origin says where tasks came from (see taskSource).
 //
 // Nothing is created until everything the Workflow needs is known to be there: the referenced
-// Tasks exist, no inline Task's name is taken, and the boot options resolve.
+// Tasks exist, no inline Task's name is taken, and the boot options and references resolve.
 func (scope *machineReconcileScope) createTaskWorkflow(hw *tinkv2.Hardware, tasks []infrastructurev1.MachineTask, origin string) error {
 	if len(hw.Spec.StorageDevices) < 1 {
 		return ErrHardwareMissingDiskConfiguration
@@ -234,11 +235,16 @@ func (scope *machineReconcileScope) createTaskWorkflow(hw *tinkv2.Hardware, task
 		return err
 	}
 
+	references, err := scope.workflowReferences(hw)
+	if err != nil {
+		return err
+	}
+
 	if err := scope.ensureTasks(inline); err != nil {
 		return err
 	}
 
-	wf := scope.taskWorkflow(hw, refs, boot)
+	wf := scope.taskWorkflow(hw, refs, boot, references)
 	if err := scope.setResourceOwnership(wf); err != nil {
 		return fmt.Errorf("setting workflow ownership: %w", err)
 	}
@@ -342,13 +348,16 @@ func (scope *machineReconcileScope) referencedTask(task infrastructurev1.Machine
 }
 
 // taskWorkflow returns the machine's Workflow running the Tasks refs on hw, each with its boot
-// options from boot (index-aligned).
-func (scope *machineReconcileScope) taskWorkflow(hw *tinkv2.Hardware, refs []tinkv2.SimpleReference, boot []*tinkv2.BootOptions) *tinkv2.Workflow {
+// options from boot (index-aligned), with the rendered references, the machine's vars, and the
+// machine variables in its template map.
+func (scope *machineReconcileScope) taskWorkflow(hw *tinkv2.Hardware, refs []tinkv2.SimpleReference, boot []*tinkv2.BootOptions, references map[string]tinkv2.Reference) *tinkv2.Workflow {
 	wf := &tinkv2.Workflow{
 		ObjectMeta: metav1.ObjectMeta{Name: scope.tinkerbellMachine.Name, Namespace: scope.tinkerbellNamespace()},
 		Spec: tinkv2.WorkflowSpec{
-			Globals: &tinkv2.Extra{TemplateMap: scope.workflowTemplateData(hw)},
-			Tasks:   make([]tinkv2.WorkflowTask, len(refs)),
+			Globals:    &tinkv2.Extra{TemplateMap: scope.taskTemplateData(hw)},
+			References: references,
+			Vars:       maps.Clone(scope.tinkerbellMachine.Spec.Vars),
+			Tasks:      make([]tinkv2.WorkflowTask, len(refs)),
 		},
 	}
 

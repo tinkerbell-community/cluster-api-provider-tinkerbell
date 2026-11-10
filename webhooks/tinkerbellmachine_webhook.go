@@ -48,14 +48,14 @@ func (w *TinkerbellMachine) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // ValidateCreate implements admission.Validator.
 func (w *TinkerbellMachine) ValidateCreate(_ context.Context, obj *infrastructurev1.TinkerbellMachine) (admission.Warnings, error) {
-	allErrs := validateMachineSpec(&obj.Spec)
+	allErrs := validateMachineSpec(obj.Namespace, &obj.Spec)
 
 	return machineWarnings(&obj.Spec), aggregateObjErrors(obj.GroupVersionKind().GroupKind(), obj.Name, allErrs)
 }
 
 // ValidateUpdate implements admission.Validator.
 func (w *TinkerbellMachine) ValidateUpdate(_ context.Context, old *infrastructurev1.TinkerbellMachine, newTM *infrastructurev1.TinkerbellMachine) (admission.Warnings, error) {
-	allErrs := validateMachineSpec(&newTM.Spec)
+	allErrs := validateMachineSpec(newTM.Namespace, &newTM.Spec)
 
 	if old.Spec.HardwareName != "" && newTM.Spec.HardwareName != old.Spec.HardwareName {
 		allErrs = append(allErrs, field.Forbidden(field.NewPath("spec", "hardwareName"), "is immutable once set"))
@@ -79,7 +79,7 @@ func (w *TinkerbellMachine) ValidateDelete(_ context.Context, _ *infrastructurev
 	return nil, nil
 }
 
-func validateMachineSpec(spec *infrastructurev1.TinkerbellMachineSpec) field.ErrorList {
+func validateMachineSpec(namespace string, spec *infrastructurev1.TinkerbellMachineSpec) field.ErrorList {
 	var allErrs field.ErrorList
 
 	fieldBasePath := field.NewPath("spec")
@@ -95,6 +95,7 @@ func validateMachineSpec(spec *infrastructurev1.TinkerbellMachineSpec) field.Err
 	}
 
 	allErrs = append(allErrs, validateSource(fieldBasePath, spec.Tasks, spec.TemplateInline, spec.TemplateRef)...)
+	allErrs = append(allErrs, validateReferences(fieldBasePath, namespace, &spec.TinkerbellMachineConfig)...)
 
 	return allErrs
 }

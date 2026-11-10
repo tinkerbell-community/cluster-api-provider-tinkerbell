@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrastructurev1 "github.com/tinkerbell/cluster-api-provider-tinkerbell/api/v1beta2"
@@ -176,6 +177,15 @@ func workflowTestScope(g Gomega, data string, objects ...client.Object) *machine
 		tinkerbellMachine: machine,
 		tinkerbellCluster: &infrastructurev1.TinkerbellCluster{},
 		recorder:          record.NewFakeRecorder(100),
+		machine: &clusterv1.Machine{
+			ObjectMeta: metav1.ObjectMeta{Name: wfMachine, Namespace: wfNamespace},
+			Spec: clusterv1.MachineSpec{
+				ClusterName: "cluster-1",
+				Bootstrap: clusterv1.Bootstrap{ConfigRef: clusterv1.ContractVersionedObjectReference{
+					APIGroup: "bootstrap.cluster.x-k8s.io", Kind: "TalosConfig", Name: "machine-1-config",
+				}},
+			},
+		},
 	}
 }
 

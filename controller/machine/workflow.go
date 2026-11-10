@@ -154,6 +154,8 @@ func (scope *machineReconcileScope) createWorkflow(hw *tinkv2.Hardware) error {
 		return scope.createTaskWorkflow(hw, tasks, origin)
 	}
 
+	scope.warnIgnoredReferences()
+
 	wf, err := scope.newWorkflow(hw)
 	if err != nil {
 		return err
