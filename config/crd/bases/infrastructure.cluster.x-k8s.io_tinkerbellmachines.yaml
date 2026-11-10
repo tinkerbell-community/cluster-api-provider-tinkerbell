@@ -1176,6 +1176,52 @@ spec:
                 maxLength: 512
                 minLength: 1
                 type: string
+              references:
+                additionalProperties:
+                  description: |-
+                    WorkflowReference names an object the machine's Workflow reads, in the format of a Tinkerbell
+                    v1alpha2 Reference. Name and Namespace are Go templates CAPT renders with the machine's
+                    variables: machine_name, machine_namespace, cluster_name, bootstrap_config_name,
+                    tinkerbell_machine_name, hardware_name and hardware_namespace.
+                  properties:
+                    group:
+                      description: Group of the object; empty for the core API group.
+                        Not templated.
+                      type: string
+                    name:
+                      description: Name of the object, as a template.
+                      maxLength: 512
+                      minLength: 1
+                      type: string
+                    namespace:
+                      description: |-
+                        Namespace of the object, as a template. Defaults to the machine's namespace, and must
+                        resolve to it.
+                      maxLength: 512
+                      type: string
+                    resource:
+                      description: Resource is the object's lowercase plural resource
+                        name. Not templated.
+                      minLength: 1
+                      type: string
+                    version:
+                      description: Version of the object's API. Not templated.
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  - resource
+                  - version
+                  type: object
+                description: |-
+                  References are added to the machine's Workflow as spec.references, so that templates in
+                  the Workflow's spec, such as vars, can read the objects they name as
+                  {{ .references.<key> }}. CAPT renders each reference's name and namespace as Go templates
+                  with the machine's variables (see WorkflowReference) when it creates the Workflow. Each
+                  must resolve into the machine's namespace. They apply only to a machine provisioned from
+                  tasks.
+                maxProperties: 16
+                type: object
               tasks:
                 description: |-
                   Tasks are the Tinkerbell v1alpha2 Tasks run in order to provision this machine, each
@@ -1714,12 +1760,25 @@ spec:
                 required:
                 - name
                 type: object
+              vars:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Vars are added to the machine's Workflow as spec.vars, unchanged. Tinkerbell renders them
+                  with the Workflow's references and Hardware, and Tasks read them as
+                  {{ .workflow.spec.vars.<key> }}. They apply only to a machine provisioned from tasks.
+                maxProperties: 32
+                type: object
             type: object
             x-kubernetes-validations:
             - message: at most one of tasks, templateInline and templateRef may be
                 set
               rule: '[has(self.tasks), has(self.templateInline), has(self.templateRef)].filter(x,
                 x).size() <= 1'
+            - message: references and vars apply to tasks and cannot be set with templateInline
+                or templateRef
+              rule: '!(has(self.references) || has(self.vars)) || !(has(self.templateInline)
+                || has(self.templateRef))'
           status:
             description: TinkerbellMachineStatus defines the observed state of TinkerbellMachine.
             properties:

@@ -318,3 +318,70 @@ func TestTasksSurviveRoundTrip(t *testing.T) {
 		}
 	})
 }
+
+// sampleReferences is a references block naming a machine's TalosConfig with templates.
+func sampleReferences() map[string]infrav2.WorkflowReference {
+	return map[string]infrav2.WorkflowReference{
+		"talos": {
+			Group:     "bootstrap.cluster.x-k8s.io",
+			Version:   "v1beta1",
+			Resource:  "talosconfigs",
+			Name:      "{{ .bootstrap_config_name }}",
+			Namespace: "{{ .machine_namespace }}",
+		},
+	}
+}
+
+func sampleVars() map[string]string {
+	return map[string]string{"schematic_id": "{{ .references.talos.status.imageFactory.schematicID }}"}
+}
+
+// TestReferencesAndVarsSurviveRoundTrip checks that the v1beta2-only references and vars
+// fields survive a trip through v1beta1, which has neither, for every kind that carries them.
+func TestReferencesAndVarsSurviveRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("TinkerbellMachine", func(t *testing.T) {
+		t.Parallel()
+
+		want := &infrav2.TinkerbellMachine{}
+		want.Spec.References = sampleReferences()
+		want.Spec.Vars = sampleVars()
+
+		spoke := &TinkerbellMachine{}
+		if err := ConvertMachineFromHub(spoke, want); err != nil {
+			t.Fatalf("ConvertMachineFromHub: %v", err)
+		}
+
+		got := &infrav2.TinkerbellMachine{}
+		if err := ConvertMachineToHub(spoke, got); err != nil {
+			t.Fatalf("ConvertMachineToHub: %v", err)
+		}
+
+		if diff := cmp.Diff(want.Spec, got.Spec, cmpOpts); diff != "" {
+			t.Errorf("references or vars lost in the round trip (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("TinkerbellMachineTemplate", func(t *testing.T) {
+		t.Parallel()
+
+		want := &infrav2.TinkerbellMachineTemplate{}
+		want.Spec.Template.Spec.References = sampleReferences()
+		want.Spec.Template.Spec.Vars = sampleVars()
+
+		spoke := &TinkerbellMachineTemplate{}
+		if err := ConvertMachineTemplateFromHub(spoke, want); err != nil {
+			t.Fatalf("ConvertMachineTemplateFromHub: %v", err)
+		}
+
+		got := &infrav2.TinkerbellMachineTemplate{}
+		if err := ConvertMachineTemplateToHub(spoke, got); err != nil {
+			t.Fatalf("ConvertMachineTemplateToHub: %v", err)
+		}
+
+		if diff := cmp.Diff(want.Spec.Template.Spec, got.Spec.Template.Spec, cmpOpts); diff != "" {
+			t.Errorf("references or vars lost in the round trip (-want +got):\n%s", diff)
+		}
+	})
+}

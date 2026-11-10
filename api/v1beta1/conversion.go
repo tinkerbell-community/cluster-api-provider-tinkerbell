@@ -149,6 +149,8 @@ func ConvertMachineToHub(src *TinkerbellMachine, dst *infrav2.TinkerbellMachine)
 		return err
 	} else if ok {
 		dst.Spec.Tasks = restored.Spec.Tasks
+		dst.Spec.References = restored.Spec.References
+		dst.Spec.Vars = restored.Spec.Vars
 		dst.Spec.TemplateRef = restored.Spec.TemplateRef
 		dst.Spec.AddressFromPool = restored.Spec.AddressFromPool
 	}
@@ -162,7 +164,7 @@ func ConvertMachineFromHub(dst *TinkerbellMachine, src *infrav2.TinkerbellMachin
 
 	// Spec — reverse renames.
 	dst.Spec.TemplateOverride = src.Spec.TemplateInline
-	// Tasks and TemplateRef are v1beta2-only — stashed via MarshalData below.
+	// Tasks, References, Vars and TemplateRef are v1beta2-only — stashed via MarshalData below.
 	dst.Spec.HardwareAffinity = convertHardwareAffinityFromHub(src.Spec.HardwareAffinity)
 	dst.Spec.BootOptions = convertBootOptionsFromHub(src.Spec.BootOptions)
 	dst.Spec.HardwareName = src.Spec.HardwareName
@@ -202,6 +204,8 @@ func ConvertMachineTemplateToHub(src *TinkerbellMachineTemplate, dst *infrav2.Ti
 	} else if ok {
 		dst.Spec.Template.ObjectMeta = restored.Spec.Template.ObjectMeta
 		dst.Spec.Template.Spec.Tasks = restored.Spec.Template.Spec.Tasks
+		dst.Spec.Template.Spec.References = restored.Spec.Template.Spec.References
+		dst.Spec.Template.Spec.Vars = restored.Spec.Template.Spec.Vars
 		dst.Spec.Template.Spec.TemplateRef = restored.Spec.Template.Spec.TemplateRef
 		dst.Spec.Template.Spec.AddressFromPool = restored.Spec.Template.Spec.AddressFromPool
 	}
@@ -218,7 +222,7 @@ func ConvertMachineTemplateFromHub(dst *TinkerbellMachineTemplate, src *infrav2.
 	// spec.template.metadata is v1beta2-only — stashed via marshalData.
 	srcSpec := src.Spec.Template.Spec
 	dst.Spec.Template.Spec.TemplateOverride = srcSpec.TemplateInline
-	// Tasks and TemplateRef are v1beta2-only — stashed via MarshalData.
+	// Tasks, References, Vars and TemplateRef are v1beta2-only — stashed via MarshalData.
 	dst.Spec.Template.Spec.HardwareAffinity = convertHardwareAffinityFromHub(srcSpec.HardwareAffinity)
 	dst.Spec.Template.Spec.BootOptions = convertBootOptionsFromHub(srcSpec.BootOptions)
 

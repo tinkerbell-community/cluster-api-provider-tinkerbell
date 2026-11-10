@@ -43,6 +43,7 @@ const (
 // and will be copied into each TinkerbellMachine created from the template.
 //
 // +kubebuilder:validation:XValidation:rule="[has(self.tasks), has(self.templateInline), has(self.templateRef)].filter(x, x).size() <= 1",message="at most one of tasks, templateInline and templateRef may be set"
+// +kubebuilder:validation:XValidation:rule="!(has(self.references) || has(self.vars)) || !(has(self.templateInline) || has(self.templateRef))",message="references and vars apply to tasks and cannot be set with templateInline or templateRef"
 type TinkerbellMachineConfig struct {
 	// Tasks are the Tinkerbell v1alpha2 Tasks run in order to provision this machine, each
 	// given inline or by reference. Takes precedence over hardware annotations and the
@@ -54,6 +55,25 @@ type TinkerbellMachineConfig struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
 	Tasks []MachineTask `json:"tasks,omitempty"`
+
+	// References are added to the machine's Workflow as spec.references, so that templates in
+	// the Workflow's spec, such as vars, can read the objects they name as
+	// {{ .references.<key> }}. CAPT renders each reference's name and namespace as Go templates
+	// with the machine's variables (see WorkflowReference) when it creates the Workflow. Each
+	// must resolve into the machine's namespace. They apply only to a machine provisioned from
+	// tasks.
+	//
+	// +optional
+	// +kubebuilder:validation:MaxProperties=16
+	References map[string]WorkflowReference `json:"references,omitempty"`
+
+	// Vars are added to the machine's Workflow as spec.vars, unchanged. Tinkerbell renders them
+	// with the Workflow's references and Hardware, and Tasks read them as
+	// {{ .workflow.spec.vars.<key> }}. They apply only to a machine provisioned from tasks.
+	//
+	// +optional
+	// +kubebuilder:validation:MaxProperties=32
+	Vars map[string]string `json:"vars,omitempty"`
 
 	// TemplateInline is an inline Tinkerbell Template definition for this machine.
 	// Takes precedence over hardware annotations and cluster-level templates.
