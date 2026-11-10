@@ -113,6 +113,10 @@ On the Tinkerbell cluster CAPT needs, in addition to what earlier releases neede
 records events. See [REMOTE-TINKERBELL-KUBECONFIG.md](REMOTE-TINKERBELL-KUBECONFIG.md) for an
 external Tinkerbell cluster.
 
+A machine's `references` need no CAPT permissions. Tinkerbell reads the objects they name, so
+it needs an allow rule and read access to their kinds (see
+[Read the machine's objects from Tasks](QUICK-START.md#read-the-machines-objects-from-tasks)).
+
 ## Version Matrix
 
 | CAPT Version | CAPI Contract | CAPI Version | API Group Versions | Kubernetes | Go  |
@@ -128,8 +132,8 @@ storage (hub) API version. The previous `v1beta1` version remains served for
 backward compatibility. CRD conversion webhooks handle automatic bi-directional
 conversion between versions.
 
-- **v1beta2** — The hub (storage) version. New fields like `tasks`, `templateInline`,
-  `templateRef`, and `TinkerbellMachineConfig` live here. All resources are
+- **v1beta2** — The hub (storage) version. New fields like `tasks`, `references`, `vars`,
+  `templateInline`, `templateRef`, and `TinkerbellMachineConfig` live here. All resources are
   stored as v1beta2 in etcd.
 - **v1beta1** — The spoke (served) version. Existing v1beta1 manifests and
   clients continue to work. Resources are converted on the fly by the webhook.

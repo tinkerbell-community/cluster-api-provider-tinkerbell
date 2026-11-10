@@ -457,6 +457,127 @@ the entry sets no `bootMode`), and template any per-machine `isoURL` yourself. W
 CABPT in-place update extension installed, changing `tasks`, the templates or `bootOptions` of a
 running machine does not roll it out: CAPT only reads them when it provisions a machine.
 
+##### Read the machine's objects from Tasks
+
+A Task is usually shared by many machines, but some of what it needs belongs to one machine.
+For Talos, that is the installer image CABPT pins in each machine's TalosConfig. `references`
+names such objects relative to the machine, and `vars` carries what the Tasks need from them:
+
+```yaml
+# TinkerbellMachineTemplate spec.template.spec
+references:
+  talos:
+    group: bootstrap.cluster.x-k8s.io
+    version: v1beta1
+    resource: talosconfigs
+    name: '{{ .bootstrap_config_name }}'      # CAPT fills these in
+    namespace: '{{ .machine_namespace }}'
+vars:                                         # Tinkerbell fills these in
+  schematic_id: '{{ .references.talos.status.imageFactory.schematicID }}'
+  talos_version: '{{ .references.talos.status.imageFactory.talosVersion }}'
+  installer_image: '{{ .references.talos.status.imageFactory.installerImage }}'
+tasks:
+- name: install
+  taskRef:
+    name: talos-install
+---
+apiVersion: tinkerbell.org/v1alpha2
+kind: Task
+metadata:
+  name: talos-install
+spec:
+  actions:
+  - name: talos2disk
+    image: ghcr.io/sidero-community/actions/talos2disk:latest
+    timeoutSeconds: 1200
+    env:
+      SCHEMATIC_ID: '{{ .workflow.spec.vars.schematic_id }}'
+      TALOS_VERSION: '{{ .workflow.spec.vars.talos_version }}'
+```
+
+Two template engines are involved, and each owns its own fields:
+
+- **CAPT** fills in each reference's `name` and `namespace` with the machine variables below
+  when it creates the machine's Workflow, and puts the result in the Workflow's
+  `spec.references`. `group`, `version` and `resource` are not templates.
+- **Tinkerbell** renders everything else. `vars` are copied to the Workflow's `spec.vars`
+  unchanged; Tinkerbell renders them with the Workflow's references (`.references.<key>`) and
+  Hardware (`.hardware`), and Tasks read them as `{{ .workflow.spec.vars.<key> }}`. A Task can't
+  read the Workflow's references directly: Tinkerbell keeps each object's references to itself.
+
+| Variable | Value |
+| --- | --- |
+| `machine_name` | the Cluster API Machine's name |
+| `machine_namespace` | the Machine's namespace, which is also the TinkerbellMachine's |
+| `cluster_name` | the Machine's `spec.clusterName` |
+| `bootstrap_config_name` | the Machine's `spec.bootstrap.configRef.name`, or empty when it has none |
+| `tinkerbell_machine_name` | the TinkerbellMachine's name |
+| `hardware_name` | the name of the Hardware the machine claimed |
+| `hardware_namespace` | the Hardware's namespace, where the Workflow is created |
+
+Use `bootstrap_config_name` to name the machine's TalosConfig: it is the Machine's own pointer
+to its bootstrap config. Tasks can also read the variables as
+`{{ .workflow.spec.globals.templateMap.<variable> }}`.
+
+Rules:
+
+- **Namespace:** a reference must resolve into the machine's namespace; an empty `namespace`
+  means it. Anything else is refused with a `ReferenceOutsideNamespace` event, and objects
+  outside any namespace can't be referenced.
+- **Mistakes:** an unknown variable is rejected when the object is created. A reference whose
+  name renders empty or invalid, such as `bootstrap_config_name` on a Machine without a
+  bootstrap config, stops the machine with a `ReferenceNotRendered` event, before anything is
+  created.
+- **Tasks only:** `references` and `vars` can't be set next to `templateInline` or
+  `templateRef`. When the machine's template comes from a Hardware annotation or the cluster,
+  they are ignored, with a `ReferencesIgnored` event.
+- **External Tinkerbell:** references are not supported (`ReferencesUnsupported`), because
+  Tinkerbell would look the objects up in its own cluster. `vars` alone are fine.
+- **Without the Image Factory:** a missing key fails the Workflow's rendering, which CAPT
+  reports as `WorkflowNotRendered`. For clusters whose TalosConfigs may have no
+  `status.imageFactory`, use a default:
+  `{{ dig "status" "imageFactory" "schematicID" "" .references.talos }}`.
+
+Tinkerbell reads the referenced objects with its own credentials, and denies every reference
+unless a rule allows it. In the Tinkerbell chart's values:
+
+```yaml
+deployment:
+  envs:
+    tinkController:
+      referenceAllowListRules:
+      - reference:
+          group: ["bootstrap.cluster.x-k8s.io"]
+          resource: ["talosconfigs"]
+rbac:
+  additionalRoleRules:
+  - apiGroups: ["bootstrap.cluster.x-k8s.io"]
+    resources: ["talosconfigs"]
+    verbs: ["get", "list", "watch"]
+```
+
+Tinkerbell must also watch the machine's namespace, and run in the same cluster as the
+machines.
+
+- **Security:** anyone who can write a TinkerbellMachine in a namespace can read, through its
+  Workflow, any object in that namespace whose kind your rule allows. The rule applies to all of
+  Tinkerbell, not just CAPT's Workflows: any Task, Hardware or Workflow in a namespace Tinkerbell
+  watches can then read objects of that kind in every watched namespace. Narrow it by source and
+  reference namespace where you can (`"source": {"namespace": [...]}`,
+  `"reference": {"namespace": [...]}`). A TalosConfig's spec holds its config patches, which can
+  contain secrets.
+- **Timing:** Tasks get their values when Tinkerbell first renders the Workflow; later changes
+  to the referenced object don't reach them. Tinkerbell reads the references again around each
+  task's boot options, so keep the object readable until the Workflow finishes, or that step is
+  retried and netboot stays on.
+- **In place:** like `tasks`, CAPT reads `references` and `vars` only when it provisions a
+  machine. A CABPT in-place update extension that covers them absorbs changes without a rollout.
+
+This is simpler than having a Cluster API Runtime Extension write these values onto the
+Hardware: no Runtime SDK hook fires per Machine when it is provisioned, Cluster API's guidance
+is that extensions should not make out-of-band changes, and CABPT remains the only source of
+the values.
+
 ##### How CAPT runs the template
 
 This applies to the deprecated `templateInline`, `templateRef` and template override
