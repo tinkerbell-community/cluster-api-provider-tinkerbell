@@ -36,7 +36,7 @@ import (
 const (
 	referencesRuleMessage = "references and vars apply to tasks and cannot be set with templateInline or templateRef"
 	sourceRuleMessage     = "at most one of tasks, templateInline and templateRef may be set"
-	entryRuleMessage  = "exactly one of taskRef and taskInline must be set"
+	entryRuleMessage      = "exactly one of taskRef and taskInline must be set"
 )
 
 func inlineEntry(name string) v1beta2.MachineTask {
@@ -140,40 +140,7 @@ func rejectedObjects() []rejectedObject {
 	withRefs := inlineEntry("a")
 	withRefs.TaskInline.References = map[string]tinkv2.Reference{"secret": {Name: "s", Resource: "secrets", Version: "v1"}}
 
-	talos := v1beta2.WorkflowReference{
-		Group: "bootstrap.cluster.x-k8s.io", Version: "v1beta1", Resource: "talosconfigs",
-		Name: "{{ .bootstrap_config_name }}",
-	}
-
-	noVersion := talos
-	noVersion.Version = ""
-
-	tooMany := map[string]v1beta2.WorkflowReference{}
-	for i := range 17 {
-		tooMany[fmt.Sprintf("r%d", i)] = talos
-	}
-
-	return []rejectedObject{
-		{
-			name: "machine with references and templateInline",
-			obj:  machineWith(v1beta2.TinkerbellMachineConfig{References: map[string]v1beta2.WorkflowReference{"talos": talos}, TemplateInline: "t"}),
-			want: referencesRuleMessage,
-		},
-		{
-			name: "machine with vars and templateRef",
-			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Vars: map[string]string{"k": "v"}, TemplateRef: &v1beta2.ObjectRef{Name: "t"}}),
-			want: referencesRuleMessage,
-		},
-		{
-			name: "reference without a version",
-			obj:  machineWith(v1beta2.TinkerbellMachineConfig{References: map[string]v1beta2.WorkflowReference{"talos": noVersion}}),
-			want: "should be at least 1 chars long",
-		},
-		{
-			name: "seventeen references",
-			obj:  machineWith(v1beta2.TinkerbellMachineConfig{References: tooMany}),
-			want: "must have at most 16 items",
-		},
+	return append(referenceRejections(), []rejectedObject{
 		{
 			name: "machine with tasks and templateInline",
 			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Tasks: []v1beta2.MachineTask{inlineEntry("a")}, TemplateInline: "t"}),
@@ -221,6 +188,45 @@ func rejectedObjects() []rejectedObject {
 			name: "entry with the legacy iso boot mode",
 			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Tasks: []v1beta2.MachineTask{bootISO}}),
 			want: "Unsupported value",
+		},
+	}...)
+}
+
+// referenceRejections are the references and vars objects the CRDs must refuse.
+func referenceRejections() []rejectedObject {
+	talos := v1beta2.WorkflowReference{
+		Group: "bootstrap.cluster.x-k8s.io", Version: "v1beta1", Resource: "talosconfigs",
+		Name: "{{ .bootstrap_config_name }}",
+	}
+
+	noVersion := talos
+	noVersion.Version = ""
+
+	tooMany := map[string]v1beta2.WorkflowReference{}
+	for i := range 17 {
+		tooMany[fmt.Sprintf("r%d", i)] = talos
+	}
+
+	return []rejectedObject{
+		{
+			name: "machine with references and templateInline",
+			obj:  machineWith(v1beta2.TinkerbellMachineConfig{References: map[string]v1beta2.WorkflowReference{"talos": talos}, TemplateInline: "t"}),
+			want: referencesRuleMessage,
+		},
+		{
+			name: "machine with vars and templateRef",
+			obj:  machineWith(v1beta2.TinkerbellMachineConfig{Vars: map[string]string{"k": "v"}, TemplateRef: &v1beta2.ObjectRef{Name: "t"}}),
+			want: referencesRuleMessage,
+		},
+		{
+			name: "reference without a version",
+			obj:  machineWith(v1beta2.TinkerbellMachineConfig{References: map[string]v1beta2.WorkflowReference{"talos": noVersion}}),
+			want: "should be at least 1 chars long",
+		},
+		{
+			name: "seventeen references",
+			obj:  machineWith(v1beta2.TinkerbellMachineConfig{References: tooMany}),
+			want: "must have at most 16 items",
 		},
 	}
 }

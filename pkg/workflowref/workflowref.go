@@ -23,7 +23,6 @@ package workflowref
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"text/template"
 
@@ -63,19 +62,17 @@ var (
 	ErrOutsideNamespace = errors.New("reference outside the machine's namespace")
 )
 
-var names = []string{
-	BootstrapConfigName,
-	ClusterName,
-	HardwareName,
-	HardwareNamespace,
-	MachineName,
-	MachineNamespace,
-	TinkerbellMachineName,
-}
-
 // Names returns the machine variable names, sorted.
 func Names() []string {
-	return slices.Clone(names)
+	return []string{
+		BootstrapConfigName,
+		ClusterName,
+		HardwareName,
+		HardwareNamespace,
+		MachineName,
+		MachineNamespace,
+		TinkerbellMachineName,
+	}
 }
 
 // Variables returns the machine variables of the TinkerbellMachine tm, owned by machine, that
@@ -105,6 +102,8 @@ func Variables(machine *clusterv1.Machine, tm *infrastructurev1.TinkerbellMachin
 // Sample returns every machine variable set to a placeholder, to check templates at admission,
 // before any machine exists.
 func Sample() map[string]string {
+	names := Names()
+
 	sample := make(map[string]string, len(names))
 	for _, name := range names {
 		sample[name] = "x"
