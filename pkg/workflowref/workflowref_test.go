@@ -76,22 +76,59 @@ func TestVariables(t *testing.T) {
 	}
 }
 
-// The admission check runs templates against Sample, the controller against Variables: if
-// they ever disagreed, valid machines would be rejected or typos would pass admission.
-func TestSampleHasEveryVariable(t *testing.T) {
+// The admission check accepts the variables Names lists, the controller renders with
+// Variables: if they ever disagreed, valid machines would be rejected or typos would pass
+// admission.
+func TestNamesMatchVariables(t *testing.T) {
 	t.Parallel()
 
 	machine, tm, hw := fixtures()
 
-	sample := slices.Sorted(maps.Keys(workflowref.Sample()))
 	variables := slices.Sorted(maps.Keys(workflowref.Variables(machine, tm, hw)))
-
-	if diff := cmp.Diff(variables, sample); diff != "" {
-		t.Errorf("Sample keys differ from Variables keys (-variables +sample):\n%s", diff)
-	}
-
 	if diff := cmp.Diff(variables, workflowref.Names()); diff != "" {
 		t.Errorf("Names differ from Variables keys (-variables +names):\n%s", diff)
+	}
+}
+
+// Reference templates come from whoever can write a TinkerbellMachine, so they may only
+// substitute variables: anything that could make CAPT loop, allocate or recurse is refused
+// before it runs.
+func TestCheck(t *testing.T) {
+	t.Parallel()
+
+	for _, ok := range []string{
+		"",
+		"literal",
+		"{{ .machine_name }}",
+		"{{ .machine_name }}-{{ .cluster_name }}",
+		"{{- .machine_name -}}",
+	} {
+		if err := workflowref.Check(ok); err != nil {
+			t.Errorf("Check(%q) = %v; want nil", ok, err)
+		}
+	}
+
+	for text, want := range map[string]string{
+		"{{ .machine_namespcae }}":               `unknown variable "machine_namespcae"`,
+		"{{range 30000000}}{{end}}":              "only {{ .variable }} substitutions are allowed",
+		`{{printf "%01000000d" 0}}`:              "only {{ .variable }} substitutions are allowed",
+		`{{define "a"}}x{{end}}{{template "a"}}`: "only {{ .variable }} substitutions are allowed",
+		`{{ .machine_name | printf "%s" }}`:      "only {{ .variable }} substitutions are allowed",
+		"{{ $x := .machine_name }}{{ $x }}":      "only {{ .variable }} substitutions are allowed",
+		"{{ if .machine_name }}a{{ end }}":       "only {{ .variable }} substitutions are allowed",
+		"{{ .machine_name.x }}":                  "only {{ .variable }} substitutions are allowed",
+		"{{ len .machine_name }}":                "only {{ .variable }} substitutions are allowed",
+		"{{ .machine_name":                       "unclosed action",
+	} {
+		err := workflowref.Check(text)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Check(%q) = %v; want an error containing %q", text, err, want)
+		}
+
+		// Execute applies the same rule, so nothing refused here ever runs.
+		if _, err := workflowref.Execute(text, workflowref.Variables(fixtures())); err == nil {
+			t.Errorf("Execute(%q) succeeded; want an error", text)
+		}
 	}
 }
 
@@ -163,6 +200,7 @@ func TestRender(t *testing.T) {
 		{name: "name that is not a DNS-1123 subdomain", ref: with("{{ .machine_name }}_x", ""), wantErr: workflowref.ErrNotRendered, wantErrSubstr: "m1_x"},
 		{name: "unknown variable", ref: with("{{ .nope }}", ""), wantErr: workflowref.ErrNotRendered, wantErrSubstr: "nope"},
 		{name: "namespace parse error", ref: with("m1-config", "{{ .machine_namespace"), wantErr: workflowref.ErrNotRendered, wantErrSubstr: "namespace"},
+		{name: "range in name", ref: with("{{range 30000000}}{{end}}", ""), wantErr: workflowref.ErrNotRendered, wantErrSubstr: "only"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

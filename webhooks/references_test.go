@@ -120,6 +120,32 @@ func Test_validateReferences(t *testing.T) {
 	}
 }
 
+// Reference templates come from whoever can write a TinkerbellMachine: anything but a
+// {{ .variable }} substitution is refused without running it, so a template that would loop or
+// allocate without bound cannot exhaust the manager at admission.
+func Test_validateReferences_refuses_anything_but_substitution(t *testing.T) {
+	t.Parallel()
+
+	for name, change := range map[string]func(*infrastructurev1.WorkflowReference){
+		"range in name":               func(r *infrastructurev1.WorkflowReference) { r.Name = "{{range 30000000}}{{end}}" },
+		"printf in namespace":         func(r *infrastructurev1.WorkflowReference) { r.Namespace = `{{ printf "%01000000d" 0 }}` },
+		"define and template in name": func(r *infrastructurev1.WorkflowReference) { r.Name = `{{define "a"}}x{{end}}{{template "a"}}` },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			ref := talosRef()
+			change(&ref)
+
+			errs := validateReferences(field.NewPath("spec"), "capi",
+				&infrastructurev1.TinkerbellMachineConfig{References: map[string]infrastructurev1.WorkflowReference{"talos": ref}})
+			g.Expect(errorTypes(errs)).To(Equal([]field.ErrorType{field.ErrorTypeInvalid}), "%v", errs)
+			g.Expect(errs.ToAggregate().Error()).To(ContainSubstring("only {{ .variable }} substitutions are allowed"))
+		})
+	}
+}
+
 func Test_webhooks_check_references(t *testing.T) {
 	t.Parallel()
 

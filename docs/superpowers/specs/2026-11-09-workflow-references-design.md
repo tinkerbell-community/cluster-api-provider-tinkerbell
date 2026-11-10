@@ -201,8 +201,12 @@ Workflows that run tasks. Tasks can then read, for example,
 
 ## Rendering (CAPT)
 
-- **Engine:** Go `text/template` with `missingkey=error`, the built-in functions only, and the
-  variables above as a `map[string]string`.
+- **Engine:** Go `text/template` with `missingkey=error` and the variables above as a
+  `map[string]string`, limited to literal text and `{{ .variable }}` substitutions of known
+  variables. Functions, pipelines, control structures and `define`/`template` are refused
+  before anything runs, because the templates come from whoever can write a TinkerbellMachine
+  and could otherwise make CAPT loop or allocate without bound. *(Amended after the final
+  review, which found that an unrestricted template could exhaust the CAPT manager.)*
 - **What is rendered:** `name` and `namespace` only. The result is used as is, with no trimming.
 - **Name:** must be non-empty and a valid DNS-1123 subdomain. Otherwise the reference is not
   rendered (`ReferenceNotRendered`). An unset `bootstrap_config_name` produces an empty name, which
@@ -221,9 +225,9 @@ For each reference, at `spec.references[<key>]` (TinkerbellMachineTemplate:
 - **Group, version and resource:** must not contain `{{` (Invalid: these are not templated).
 - **Name and namespace:**
   - They must parse as templates.
-  - They must execute without error against sample data that has every variable set to a valid
-    placeholder, such as `x`. A misspelled variable is therefore rejected, and the message lists
-    the known variables.
+  - They must contain only literal text and `{{ .variable }}` substitutions of known variables,
+    checked on the parse tree without running anything. A misspelled variable is therefore
+    rejected, and the message lists the known variables.
   - A namespace with no `{{`, which is a literal, must be empty or equal to the object's own
     namespace (Forbidden). Templated namespaces are checked when the Workflow is created.
 - **Source:** `references` or `vars` set together with `templateInline` or `templateRef` is

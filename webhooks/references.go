@@ -35,8 +35,9 @@ const referencesRuleMessage = "references and vars apply to tasks and cannot be 
 // validateReferences checks the references and vars of the machine config at path, for a
 // machine in namespace:
 //   - group, version and resource are not templates;
-//   - name and namespace render with every machine variable, so a misspelt variable is caught
-//     before any machine exists;
+//   - name and namespace are literal text and {{ .variable }} substitutions of known machine
+//     variables, checked without running them, so a misspelt variable is caught before any
+//     machine exists and nothing a machine writer submits runs at admission;
 //   - a literal namespace is empty or the machine's (a templated one is checked when the
 //     Workflow is created);
 //   - neither field is set next to templateInline or templateRef.
@@ -80,7 +81,7 @@ func validateReference(path *field.Path, namespace string, ref infrastructurev1.
 	for _, templated := range []struct {
 		name, value string
 	}{{"name", ref.Name}, {"namespace", ref.Namespace}} {
-		if _, err := workflowref.Execute(templated.value, workflowref.Sample()); err != nil {
+		if err := workflowref.Check(templated.value); err != nil {
 			errs = append(errs, field.Invalid(path.Child(templated.name), templated.value,
 				fmt.Sprintf("%v; known variables: %s", err, known)))
 		}

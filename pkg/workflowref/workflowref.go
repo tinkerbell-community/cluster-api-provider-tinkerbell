@@ -23,8 +23,10 @@ package workflowref
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"text/template"
+	tparse "text/template/parse"
 
 	tinkv2 "github.com/tinkerbell/tinkerbell/api/v1alpha2/tinkerbell"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -99,24 +101,87 @@ func Variables(machine *clusterv1.Machine, tm *infrastructurev1.TinkerbellMachin
 	return vars
 }
 
-// Sample returns every machine variable set to a placeholder, to check templates at admission,
-// before any machine exists.
-func Sample() map[string]string {
-	names := Names()
+// errNotSubstitution is returned for a template that does anything but substitute variables.
+var errNotSubstitution = errors.New("only {{ .variable }} substitutions are allowed")
 
-	sample := make(map[string]string, len(names))
-	for _, name := range names {
-		sample[name] = "x"
-	}
-
-	return sample
-}
-
-// Execute renders text as a Go template with vars. A variable vars lacks is an error.
-func Execute(text string, vars map[string]string) (string, error) {
+// parse parses text as a reference template, refusing anything but literal text and
+// {{ .variable }} substitutions of the machine variables. Reference templates are written by
+// whoever can write a TinkerbellMachine, so functions, pipelines, control structures and
+// nested templates, which could make CAPT loop, allocate or recurse without bound, never run.
+func parse(text string) (*template.Template, error) {
 	tmpl, err := template.New("reference").Option("missingkey=error").Parse(text)
 	if err != nil {
-		return "", err //nolint:wrapcheck // the template error says what is wrong
+		return nil, err //nolint:wrapcheck // the template error says what is wrong
+	}
+
+	if len(tmpl.Templates()) > 1 {
+		return nil, errNotSubstitution
+	}
+
+	if tmpl.Tree == nil || tmpl.Root == nil {
+		return tmpl, nil
+	}
+
+	known := Names()
+
+	for _, node := range tmpl.Root.Nodes {
+		if err := checkNode(node, known); err != nil {
+			return nil, err
+		}
+	}
+
+	return tmpl, nil
+}
+
+// checkNode accepts literal text and a {{ .variable }} substitution of one of known.
+func checkNode(node tparse.Node, known []string) error {
+	switch node := node.(type) {
+	case *tparse.TextNode:
+		return nil
+	case *tparse.ActionNode:
+		name, ok := substitution(node)
+		if !ok {
+			return errNotSubstitution
+		}
+
+		if !slices.Contains(known, name) {
+			return fmt.Errorf("unknown variable %q", name)
+		}
+
+		return nil
+	default:
+		return errNotSubstitution
+	}
+}
+
+// substitution returns the variable an action substitutes, when it is exactly {{ .variable }}.
+func substitution(action *tparse.ActionNode) (string, bool) {
+	pipe := action.Pipe
+	if pipe == nil || len(pipe.Decl) > 0 || pipe.IsAssign || len(pipe.Cmds) != 1 || len(pipe.Cmds[0].Args) != 1 {
+		return "", false
+	}
+
+	field, ok := pipe.Cmds[0].Args[0].(*tparse.FieldNode)
+	if !ok || len(field.Ident) != 1 {
+		return "", false
+	}
+
+	return field.Ident[0], true
+}
+
+// Check reports whether text is a valid reference template: literal text and {{ .variable }}
+// substitutions of the machine variables only. It runs nothing.
+func Check(text string) error {
+	_, err := parse(text)
+
+	return err
+}
+
+// Execute renders text as a reference template with vars. A template Check refuses never runs.
+func Execute(text string, vars map[string]string) (string, error) {
+	tmpl, err := parse(text)
+	if err != nil {
+		return "", err
 	}
 
 	var out strings.Builder

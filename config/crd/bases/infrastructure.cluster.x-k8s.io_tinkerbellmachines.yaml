@@ -1180,23 +1180,25 @@ spec:
                 additionalProperties:
                   description: |-
                     WorkflowReference names an object the machine's Workflow reads, in the format of a Tinkerbell
-                    v1alpha2 Reference. Name and Namespace are Go templates CAPT renders with the machine's
+                    v1alpha2 Reference. Name and Namespace are templates CAPT renders with the machine's
                     variables: machine_name, machine_namespace, cluster_name, bootstrap_config_name,
-                    tinkerbell_machine_name, hardware_name and hardware_namespace.
+                    tinkerbell_machine_name, hardware_name and hardware_namespace. They may hold only literal
+                    text and {{ .variable }} substitutions.
                   properties:
                     group:
                       description: Group of the object; empty for the core API group.
                         Not templated.
                       type: string
                     name:
-                      description: Name of the object, as a template.
+                      description: Name of the object, as a template of literal text
+                        and {{ .variable }} substitutions.
                       maxLength: 512
                       minLength: 1
                       type: string
                     namespace:
                       description: |-
-                        Namespace of the object, as a template. Defaults to the machine's namespace, and must
-                        resolve to it.
+                        Namespace of the object, as a template of literal text and {{ .variable }}
+                        substitutions. Defaults to the machine's namespace, and must resolve to it.
                       maxLength: 512
                       type: string
                     resource:

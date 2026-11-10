@@ -499,7 +499,9 @@ Two template engines are involved, and each owns its own fields:
 
 - **CAPT** fills in each reference's `name` and `namespace` with the machine variables below
   when it creates the machine's Workflow, and puts the result in the Workflow's
-  `spec.references`. `group`, `version` and `resource` are not templates.
+  `spec.references`. They may hold only literal text and `{{ .variable }}` substitutions:
+  functions, pipelines and control structures are refused. `group`, `version` and `resource`
+  are not templates.
 - **Tinkerbell** renders everything else. `vars` are copied to the Workflow's `spec.vars`
   unchanged; Tinkerbell renders them with the Workflow's references (`.references.<key>`) and
   Hardware (`.hardware`), and Tasks read them as `{{ .workflow.spec.vars.<key> }}`. A Task can't
@@ -553,7 +555,7 @@ rbac:
   additionalRoleRules:
   - apiGroups: ["bootstrap.cluster.x-k8s.io"]
     resources: ["talosconfigs"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get"]
 ```
 
 Tinkerbell must also watch the machine's namespace, and run in the same cluster as the
