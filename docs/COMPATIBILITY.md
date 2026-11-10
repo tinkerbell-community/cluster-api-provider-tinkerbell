@@ -28,6 +28,7 @@ Machines provisioned from `tasks` never need the Template CRD.
 
 | CAPT | Tinkerbell (tinkerbell-community) |
 | ---- | --------------------------------- |
+| v0.11.0 | v0.27.0 or later (tested with v0.28.6); adds `references` and `vars`, whose references need a Tinkerbell allow rule and read access to the kinds they name |
 | v0.10.1 | v0.27.0 or later (tested with v0.28.7); same as v0.10.0, built against API module v0.28.1, whose conversion takes `dhcp.uefi` from `spec.bmc.bootMode` as Tinkerbell v0.28.7 does |
 | v0.10.0 | v0.27.0 or later (tested with v0.28.6); adds `tasks`, which needs Tinkerbell's `v1alpha2` Task CRD |
 | v0.9.2 | v0.27.0 or later; needed for a Tinkerbell without the Template CRD |

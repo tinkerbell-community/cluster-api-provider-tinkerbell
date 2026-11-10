@@ -573,7 +573,8 @@ machines.
   task's boot options, so keep the object readable until the Workflow finishes, or that step is
   retried and netboot stays on.
 - **In place:** like `tasks`, CAPT reads `references` and `vars` only when it provisions a
-  machine. A CABPT in-place update extension that covers them absorbs changes without a rollout.
+  machine. CABPT's in-place update extension absorbs changes to them without a rollout from
+  v0.10.4 on, including removing a reference or a var.
 
 This is simpler than having a Cluster API Runtime Extension write these values onto the
 Hardware: no Runtime SDK hook fires per Machine when it is provisioned, Cluster API's guidance
