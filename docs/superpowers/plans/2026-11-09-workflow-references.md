@@ -384,6 +384,11 @@ than the kind cluster created in Task 6. Always pass that cluster's own `--kubec
 **Files** (CAPT worktree):
 - Modify: `docs/QUICK-START.md`: add the section "Read the machine's objects from Tasks",
   after the tasks section, with everything the spec's Documentation section lists.
+  - The main example reads CABPT's `status.imageFactory.schematicID`, `.talosVersion` and
+    `.installerImage` into `vars` (`schematic_id`, `talos_version`, `installer_image`).
+  - A talos2disk Task passes them as `SCHEMATIC_ID` and `TALOS_VERSION`.
+  - Show the `dig` form for clusters without the Image Factory, for example
+    `{{ dig "status" "imageFactory" "schematicID" "" .references.talos }}`.
   - For the allow rule, read how `deployment.envs.tinkController.referenceAllowListRules`
     becomes a flag in the Tinkerbell chart at v0.28.6
     (`git -C /home/appkins/src/tinkerbell-community/tinkerbell show v0.28.6:helm/tinkerbell/templates/...`),

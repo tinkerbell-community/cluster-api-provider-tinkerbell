@@ -1,6 +1,6 @@
 # Workflow references and vars on TinkerbellMachine: design
 
-Date: 2026-11-09. Status: approved direction; this document is for review.
+Date: 2026-11-09. Status: approved by the user on 2026-11-10.
 
 ## Intent
 
@@ -276,7 +276,14 @@ the events explain why.
 
 Add a section, "Read the machine's objects from Tasks", covering:
 
-- the example above;
+- the example above, extended to all three values CABPT publishes in
+  `status.imageFactory`: `schematicID`, `talosVersion` and `installerImage`, passed to talos2disk
+  as `SCHEMATIC_ID` and `TALOS_VERSION`. Also show the `dig` form with a default for clusters
+  that don't use the Image Factory, because a missing key fails the render;
+- why this beats writing the values onto Hardware from a Runtime Extension:
+  - no Runtime SDK hook fires per Machine at provisioning;
+  - Cluster API's guidance is that extensions should not make out-of-band changes;
+  - CABPT is the single source of the values;
 - the variables table;
 - the two-engine rule: CAPT fills in reference names and namespaces, and Tinkerbell renders
   `vars` and Tasks;
